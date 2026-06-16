@@ -4474,12 +4474,13 @@ async function iaBatchStart(){
     if(sb){sb.textContent='Analizando...';sb.className='badge b-blue';}
     try{
       const result=await iaBatchAnalyzeOne(item);
-      iaBatchApplyOne(result,item);
+      const applied=iaBatchApplyOne(result,item);
       if(sb){sb.textContent='✓ Aplicado';sb.className='badge b-green';}
       const resEl=document.getElementById('ia-batch-results');
       const div=document.createElement('div');
-      div.style.cssText='display:flex;align-items:center;gap:8px;padding:8px 10px;background:var(--green-bg);border-radius:6px;font-size:12px;border-left:3px solid var(--green)';
-      div.innerHTML='<span>✓</span><div style="flex:1"><strong>'+item.name+'</strong><div style="color:var(--muted)">'+(result.tipo_documento||'documento')+(result.titulo?' — '+result.titulo:'')+'</div></div>';
+      div.style.cssText='padding:10px 12px;background:var(--green-bg);border-radius:8px;border-left:3px solid var(--green);margin-bottom:4px';
+      div.innerHTML='<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><span style="font-size:16px">✓</span><strong style="font-size:13px">'+item.name+'</strong><span class="badge b-gray" style="font-size:10px">'+(result.tipo_documento||'doc')+'</span></div>'
+        +'<div style="display:flex;gap:6px;flex-wrap:wrap">'+(applied||[]).map(a=>'<span style="font-size:11px;background:#fff;border-radius:20px;padding:2px 8px;color:var(--slate)">'+a+'</span>').join('')+'</div>';
       resEl.appendChild(div);
     }catch(err){
       errors++;
@@ -4508,13 +4509,128 @@ async function iaBatchStart(){
 
 async function iaBatchAnalyzeOne(item){
   const p=getProject();
-  const chaptersContext=p.budget.map(b=>b.num+': '+b.desc+' (base: '+b.budget+'€)').join(', ');
-  const sys='Eres el asistente del proyecto "'+p.name+'" ('+p.meta?.city+', '+p.meta?.country+'), coordinado por '+APP.workspace.owner+'.\n\nCapítulos: '+chaptersContext+'\n\nExtrae información y responde SOLO con JSON válido sin markdown:\n{"tipo_documento":"presupuesto_proveedor|factura|contrato|licencia|certificado|seguro|plano|albarán|otro","titulo":"","resumen":"","datos_principales":{"empresa_o_persona":"","numero_documento":"","fecha_emision":"","fecha_vencimiento":"","importe":0,"estado":""},"presupuesto_proveedor":{"es_presupuesto":false,"proveedor":"","total":0,"validez":"","plazo_entrega":"","condiciones_pago":"","chapter_desc_sugerida":"","partidas":[]},"alertas_generadas":[{"tipo":"","descripcion":"","fecha":"YYYY-MM-DD","importe":0,"prioridad":"Alta|Media|Baja"}],"campos_actualizables":{"notas_adicionales":""}}\nTipo: '+(document.getElementById('ia-doc-type')?.value||'auto')+'. Extra: '+(document.getElementById('ia-extra')?.value||'ninguna');
+  const cur=p.meta?.currency||'EUR';
+  const chaptersContext=p.budget.map(b=>b.num+': '+b.desc+' (base: '+b.budget+cur+')').join(', ');
+  const existingProviders=p.providers.map(pv=>pv.name).join(', ')||'ninguno todavía';
+
+  const sys=`Eres el motor de extracción inteligente del proyecto "${p.name}" (${p.meta?.city||''}, ${p.meta?.country||''}).
+Coordinador: ${APP.workspace.owner}. Tipo de proyecto: ${p.meta?.type||'residencial'}.
+Capítulos de presupuesto: ${chaptersContext}.
+Proveedores actuales: ${existingProviders}.
+
+Analiza el documento y extrae TODA la información posible. Responde SOLO con JSON válido, sin markdown, sin texto adicional:
+
+{
+  "tipo_documento": "presupuesto_proveedor|factura|pago|contrato|permiso|licencia|certificado|plano_arquitectura|plano_especialidad|email|acta_reunion|informe|seguro|albarán|nomina|otro",
+  "subtipo": "planta|seccion|alzado|detalle|estructura|electricidad|fontaneria|avac|telecomunicaciones|paisajismo|seguridad|otro",
+  "titulo": "",
+  "resumen": "",
+  "requiere_accion": false,
+  "accion_requerida": "",
+  "datos_principales": {
+    "empresa_o_persona": "",
+    "cargo_o_especialidad": "",
+    "email": "",
+    "telefono": "",
+    "direccion": "",
+    "numero_documento": "",
+    "fecha_emision": "",
+    "fecha_vencimiento": "",
+    "fecha_inicio": "",
+    "fecha_fin": "",
+    "importe": 0,
+    "moneda": "${cur}",
+    "estado": "",
+    "numero_licencia": "",
+    "organismo_emisor": ""
+  },
+  "proveedor": {
+    "detectado": false,
+    "nombre": "",
+    "categoria": "",
+    "email": "",
+    "telefono": "",
+    "web": "",
+    "direccion": "",
+    "especialidad": ""
+  },
+  "presupuesto": {
+    "es_presupuesto": false,
+    "total": 0,
+    "chapter_sugerido": "",
+    "plazo_entrega": "",
+    "validez": "",
+    "condiciones_pago": "",
+    "partidas": [{"descripcion":"","cantidad":0,"unidad":"","precio_unitario":0,"total":0}]
+  },
+  "pago_o_factura": {
+    "es_pago": false,
+    "tipo": "salida|entrada",
+    "importe": 0,
+    "concepto": "",
+    "emisor": "",
+    "receptor": "",
+    "fecha_pago": "",
+    "fecha_vencimiento": "",
+    "chapter_sugerido": "",
+    "proveedor_nombre": ""
+  },
+  "contrato": {
+    "es_contrato": false,
+    "partes": [],
+    "objeto": "",
+    "importe_total": 0,
+    "fecha_inicio": "",
+    "fecha_fin": "",
+    "condiciones_clave": ""
+  },
+  "comunicacion": {
+    "es_comunicacion": false,
+    "de": "",
+    "para": "",
+    "asunto": "",
+    "fecha": "",
+    "puntos_clave": [],
+    "decisiones": [],
+    "tareas_generadas": []
+  },
+  "cronograma": {
+    "fases_detectadas": [],
+    "hitos_detectados": []
+  },
+  "categoria_documento": "arquitectura|especialidades|licencias|contratos|seguros|pagos|comunicaciones|informes|otros",
+  "alertas": [{"tipo":"","descripcion":"","fecha":"YYYY-MM-DD","importe":0,"prioridad":"Alta|Media|Baja"}],
+  "notas_internas": [],
+  "tareas_generadas": [{"titulo":"","prioridad":"alta|media|baja","due_date":"YYYY-MM-DD"}]
+}
+
+REGLAS IMPORTANTES:
+- Si ves un email o comunicación de cliente → comunicacion.es_comunicacion=true, extrae puntos clave como notas
+- Si ves una factura o recibo → pago_o_factura.es_pago=true
+- Si ves un presupuesto de proveedor → presupuesto.es_presupuesto=true Y proveedor.detectado=true
+- Si el documento requiere acción o respuesta → requiere_accion=true y describe la acción
+- Detecta el capítulo de presupuesto más cercano basándote en el contenido
+- Si ves fechas límite importantes → crea alertas
+- Para planos: detecta si es arquitectura o especialidad y qué tipo
+- Para contratos: extrae partes, objeto, importes y fechas clave
+- Para actas: extrae decisiones y genera tareas para cada acuerdo
+- Tipo de documento: ${document.getElementById('ia-doc-type')?.value||'auto'}
+- Instrucción extra: ${document.getElementById('ia-extra')?.value||'ninguna'}`;
+
   const content=[];
-  if(item.type==='application/pdf'){content.push({type:'document',source:{type:'base64',media_type:'application/pdf',data:item.b64}});}
-  else{const mt=['image/jpeg','image/png','image/gif','image/webp'].includes(item.type)?item.type:'image/jpeg';content.push({type:'image',source:{type:'base64',media_type:mt,data:item.b64}});}
-  content.push({type:'text',text:'Analiza este documento y devuelve el JSON.'});
-  const res=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:1500,system:sys,messages:[{role:'user',content}]})});
+  if(item.type==='application/pdf'){
+    content.push({type:'document',source:{type:'base64',media_type:'application/pdf',data:item.b64}});
+  } else {
+    const mt=['image/jpeg','image/png','image/gif','image/webp'].includes(item.type)?item.type:'image/jpeg';
+    content.push({type:'image',source:{type:'base64',media_type:mt,data:item.b64}});
+  }
+  content.push({type:'text',text:'Analiza este documento exhaustivamente y devuelve el JSON completo.'});
+
+  const res=await fetch('/api/chat',{
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:2500,system:sys,messages:[{role:'user',content}]})
+  });
   if(!res.ok){const e=await res.json();throw new Error(e.error?.message||'Error '+res.status);}
   const data=await res.json();
   const raw=data.content[0]?.text||'';
@@ -4524,25 +4640,282 @@ async function iaBatchAnalyzeOne(item){
 
 function iaBatchApplyOne(d,item){
   const p=getProject();
-  const main=d.datos_principales||{};
-  const campos=d.campos_actualizables||{};
-  const pq=d.presupuesto_proveedor||{};
+  const cur=p.meta?.currency||'EUR';
   const ft=item.type==='application/pdf'?'pdf':'img';
-  p.documents.push({id:uid(),name:d.titulo||item.name||'Documento IA',category:pq.es_presupuesto?'contratos':'licencias',status:main.estado||'válido',file_data:item.b64,file_type:ft,file_size_kb:Math.round(atob(item.b64).length/1024),version:1,version_history:[],visible_client:false,notes:campos.notas_adicionales||'',ia_summary:d.resumen||'',uploaded_at:TODAY,expires_at:main.fecha_vencimiento||null,tags:['ia','batch']});
-  if(pq.es_presupuesto&&pq.total>0){
-    const provName=pq.proveedor||main.empresa_o_persona||'Proveedor IA';
-    let prov=p.providers.find(pv=>pv.name.toLowerCase().includes(provName.toLowerCase().slice(0,10)));
-    if(!prov){prov={id:uid(),scope:'project',name:provName,category:'importado-ia',location:{city:p.meta?.city||'',country:p.meta?.country||''},contact:{},status:'en_evaluacion',rating:null,notes:'Importado IA batch',quotes:[],origin:'ia'};p.providers.push(prov);}
-    if(!prov.quotes)prov.quotes=[];
-    const sc=p.budget.find(b=>b.desc?.toLowerCase().includes((pq.chapter_desc_sugerida||'').toLowerCase().slice(0,10)));
-    prov.quotes.push({id:uid(),amount:pq.total,chapter_id:sc?.id||'',chapter_desc:sc?.desc||pq.chapter_desc_sugerida||'',deadline:pq.plazo_entrega||'',valid_until:pq.validez||main.fecha_vencimiento||'',notes:pq.condiciones_pago||'',partidas:pq.partidas||[],status:'recibida',date:TODAY});
-    if(prov.status==='por_contactar')prov.status='en_evaluacion';
+  const main=d.datos_principales||{};
+  const applied=[];
+
+  // ─── 1. CATEGORIZAR Y GUARDAR DOCUMENTO ──────────────
+  const docCategory={
+    plano_arquitectura:'arquitectura',
+    plano_especialidad:'especialidades',
+    permiso:'licencias',licencia:'licencias',certificado:'licencias',
+    seguro:'seguros',contrato:'contratos',
+    factura:'pagos',pago:'pagos',albarán:'pagos',
+    email:'comunicaciones',acta_reunion:'comunicaciones',
+    informe:'informes',presupuesto_proveedor:'contratos'
+  }[d.tipo_documento]||d.categoria_documento||'otros';
+
+  const docName=d.titulo||item.name||'Documento IA';
+  p.documents.push({
+    id:uid(),name:docName,
+    category:docCategory,
+    subtipo:d.subtipo||'',
+    status:main.estado||'válido',
+    file_data:item.b64,file_type:ft,
+    file_size_kb:Math.round(atob(item.b64).length/1024),
+    version:1,version_history:[],visible_client:false,
+    notes:d.resumen||'',ia_summary:d.resumen||'',
+    uploaded_at:TODAY,
+    expires_at:main.fecha_vencimiento||main.fecha_fin||null,
+    numero_documento:main.numero_documento||main.numero_licencia||'',
+    organismo:main.organismo_emisor||'',
+    tags:['ia','auto']
+  });
+  applied.push('📁 Guardado en '+docCategory);
+
+  // ─── 2. PROVEEDOR ────────────────────────────────────
+  const pv=d.proveedor||{};
+  const pres=d.presupuesto||{};
+  let provRef=null;
+
+  if(pv.detectado&&pv.nombre){
+    // Buscar existente por nombre similar
+    provRef=p.providers.find(x=>x.name.toLowerCase().includes(pv.nombre.toLowerCase().slice(0,8)));
+    if(!provRef){
+      provRef={
+        id:uid(),scope:'project',
+        name:pv.nombre,
+        category:pv.categoria||pv.especialidad||'general',
+        location:{city:p.meta?.city||'',country:p.meta?.country||''},
+        contact:{
+          email:pv.email||main.email||'',
+          phone:pv.telefono||main.telefono||'',
+          web:pv.web||''
+        },
+        status:'contactado',rating:null,
+        notes:pv.especialidad||'',
+        quotes:[],origin:'ia'
+      };
+      p.providers.push(provRef);
+      applied.push('🤝 Proveedor creado: '+pv.nombre);
+    } else {
+      // Actualizar info de contacto si faltaba
+      if(!provRef.contact.email&&(pv.email||main.email))provRef.contact.email=pv.email||main.email;
+      if(!provRef.contact.phone&&(pv.telefono||main.telefono))provRef.contact.phone=pv.telefono||main.telefono;
+      applied.push('🤝 Proveedor actualizado: '+provRef.name);
+    }
   }
-  if(d.alertas_generadas?.length){d.alertas_generadas.forEach(a=>p.alerts.push({id:uid(),type:a.tipo||'Vencimiento',priority:a.prioridad||'Media',description:a.descripcion,due_date:a.fecha||'',amount:a.importe||0,currency:p.meta?.currency||'EUR',done:false,created_by:'ia-batch'}));}
+
+  // ─── 3. PRESUPUESTO DE PROVEEDOR ─────────────────────
+  if(pres.es_presupuesto&&pres.total>0){
+    // Encontrar capítulo más cercano
+    const chapDesc=(pres.chapter_sugerido||'').toLowerCase();
+    const cap=p.budget.find(b=>
+      chapDesc&&(b.desc.toLowerCase().includes(chapDesc.slice(0,12))||chapDesc.includes(b.desc.toLowerCase().slice(0,8)))
+    );
+    if(provRef){
+      if(!provRef.quotes)provRef.quotes=[];
+      provRef.quotes.push({
+        id:uid(),amount:pres.total,
+        chapter_id:cap?.id||'',chapter_desc:cap?.desc||pres.chapter_sugerido||'',
+        deadline:pres.plazo_entrega||'',
+        valid_until:pres.validez||main.fecha_vencimiento||'',
+        notes:pres.condiciones_pago||'',
+        partidas:pres.partidas||[],
+        status:'recibida',date:TODAY
+      });
+      if(provRef.status==='por_contactar')provRef.status='en_evaluacion';
+    }
+    if(cap){applied.push('◈ Cotización '+fmt(pres.total,cur)+' en cap. '+cap.num+' '+cap.desc.slice(0,20));}
+    else{applied.push('◈ Cotización '+fmt(pres.total,cur)+' (capítulo por asignar)');}
+  }
+
+  // ─── 4. FACTURA / PAGO ───────────────────────────────
+  const pf=d.pago_o_factura||{};
+  if(pf.es_pago&&pf.importe>0){
+    // Buscar capítulo
+    const chapDesc=(pf.chapter_sugerido||'').toLowerCase();
+    const cap=p.budget.find(b=>chapDesc&&b.desc.toLowerCase().includes(chapDesc.slice(0,10)));
+    // Buscar proveedor por nombre
+    const payProv=pf.proveedor_nombre?p.providers.find(pv=>pv.name.toLowerCase().includes(pf.proveedor_nombre.toLowerCase().slice(0,8))):null;
+    const payId=uid();
+    p.payments.push({
+      id:payId,
+      description:pf.concepto||docName,
+      amount:pf.importe,currency:cur,
+      type:pf.tipo||'salida',
+      status:pf.fecha_pago?'pagado':'pendiente',
+      due_date:pf.fecha_vencimiento||pf.fecha_pago||main.fecha_vencimiento||'',
+      paid_date:pf.fecha_pago||null,
+      chapter_id:cap?.id||null,
+      provider_id:payProv?.id||provRef?.id||null,
+      notes:'Importado IA desde: '+item.name,
+      visible_client:pf.tipo==='entrada',
+      receipt_data:item.b64,receipt_type:item.type
+    });
+    // Actualizar chapter.paid si está pagado
+    if(pf.fecha_pago&&cap&&pf.tipo==='salida'){cap.paid=(cap.paid||0)+pf.importe;}
+    applied.push('💶 Pago '+fmt(pf.importe,cur)+' registrado'+(cap?' en cap. '+cap.num:''));
+  }
+
+  // ─── 5. CONTRATO ─────────────────────────────────────
+  const ct=d.contrato||{};
+  if(ct.es_contrato){
+    p.contracts=p.contracts||[];
+    p.contracts.push({
+      id:uid(),
+      title:docName,
+      parties:ct.partes||[],
+      object:ct.objeto||d.resumen||'',
+      amount:ct.importe_total||main.importe||0,
+      currency:cur,
+      start_date:ct.fecha_inicio||main.fecha_inicio||'',
+      end_date:ct.fecha_fin||main.fecha_vencimiento||'',
+      conditions:ct.condiciones_clave||'',
+      status:main.estado||'activo',
+      file_data:item.b64,file_type:ft,
+      date:TODAY,origin:'ia'
+    });
+    applied.push('📋 Contrato registrado');
+    // Alerta de vencimiento del contrato
+    if(ct.fecha_fin||main.fecha_vencimiento){
+      p.alerts.push({
+        id:uid(),type:'Vencimiento contrato',priority:'Alta',
+        description:'Fin de contrato: '+docName,
+        due_date:ct.fecha_fin||main.fecha_vencimiento||'',
+        amount:ct.importe_total||0,currency:cur,done:false,created_by:'ia'
+      });
+    }
+  }
+
+  // ─── 6. EMAIL / COMUNICACIÓN ─────────────────────────
+  const com=d.comunicacion||{};
+  if(com.es_comunicacion){
+    const noteContent=[
+      com.asunto?'Asunto: '+com.asunto:'',
+      com.de?'De: '+com.de:'',
+      com.para?'Para: '+com.para:'',
+      com.fecha?'Fecha: '+com.fecha:'',
+      '',
+      '--- PUNTOS CLAVE ---',
+      ...(com.puntos_clave||[]).map(p=>'• '+p),
+      com.decisiones?.length?'\n--- DECISIONES ---':'',
+      ...(com.decisiones||[]).map(dec=>'✓ '+dec),
+    ].filter(Boolean).join('\n');
+
+    p.notes_internal.push({
+      id:uid(),
+      title:(com.de?'📧 '+com.de+': ':'📧 ')+(com.asunto||docName),
+      content:noteContent||d.resumen||'',
+      tag:'cliente',
+      date:com.fecha||TODAY,
+      source:'ia',origin_file:item.name
+    });
+    applied.push('📝 Nota creada desde comunicación');
+
+    // Si hay decisiones → crearlas como Decisiones del proyecto
+    (com.decisiones||[]).forEach(dec=>{
+      p.decisions=p.decisions||[];
+      p.decisions.push({
+        id:uid(),title:dec,description:'Extraído de: '+item.name,
+        options:[],decision_made:dec,decided_by:com.de||'',
+        deadline:'',status:'decidido',
+        requires_client:false,impact:'',date:TODAY
+      });
+    });
+    if((com.decisiones||[]).length)applied.push('⚡ '+com.decisiones.length+' decisión(es) registrada(s)');
+  }
+
+  // ─── 7. TAREAS GENERADAS ─────────────────────────────
+  const allTasks=[...(d.tareas_generadas||[]),...(com.tareas_generadas||[])];
+  allTasks.forEach(t=>{
+    if(!t.titulo)return;
+    p.tasks.push({
+      id:uid(),
+      title:t.titulo,
+      responsible:'',
+      due_date:t.due_date||'',
+      priority:t.prioridad||'media',
+      status:'pendiente',
+      category:'ia',
+      tags:['ia'],
+      created_by:'ia',
+      source_doc:item.name
+    });
+  });
+  if(allTasks.length)applied.push('✓ '+allTasks.length+' tarea(s) generada(s)');
+
+  // ─── 8. FASES DE CRONOGRAMA DETECTADAS ───────────────
+  const crono=d.cronograma||{};
+  (crono.fases_detectadas||[]).forEach(fase=>{
+    if(!fase.nombre)return;
+    // Solo añadir si no existe ya
+    const exists=p.schedule.find(s=>s.label.toLowerCase().includes(fase.nombre.toLowerCase().slice(0,8)));
+    if(!exists){
+      p.schedule.push({
+        id:uid(),label:fase.nombre,
+        category:fase.categoria||'otros',
+        status:'pendiente',
+        start:parseInt(fase.mes_inicio)||0,
+        dur:parseInt(fase.duracion)||1,
+        delay:0,notes:fase.notas||'',
+        responsible:'',color:'#6B7280'
+      });
+    }
+  });
+  (crono.hitos_detectados||[]).forEach(hito=>{
+    if(!hito.descripcion)return;
+    if(!p.milestones)p.milestones=[];
+    p.milestones.push({id:uid(),label:hito.descripcion,unit:parseInt(hito.mes)||1,status:'pendiente'});
+  });
+  if((crono.fases_detectadas||[]).length)applied.push('📅 '+crono.fases_detectadas.length+' fase(s) al cronograma');
+
+  // ─── 9. ALERTAS ──────────────────────────────────────
+  (d.alertas||[]).forEach(a=>{
+    if(!a.descripcion)return;
+    p.alerts.push({
+      id:uid(),type:a.tipo||'Vencimiento',
+      priority:a.prioridad||'Media',
+      description:a.descripcion,
+      due_date:a.fecha||'',
+      amount:a.importe||0,currency:cur,
+      done:false,created_by:'ia'
+    });
+  });
+  if((d.alertas||[]).length)applied.push('🔔 '+d.alertas.length+' alerta(s) creada(s)');
+
+  // ─── 10. NOTA SI REQUIERE ACCIÓN ─────────────────────
+  if(d.requiere_accion&&d.accion_requerida){
+    p.notes_internal.push({
+      id:uid(),
+      title:'⚠ ACCIÓN REQUERIDA: '+d.accion_requerida.slice(0,60),
+      content:'Documento: '+item.name+'\n\n'+d.accion_requerida+'\n\nResumen: '+d.resumen,
+      tag:'técnica',date:TODAY,source:'ia'
+    });
+    p.tasks.push({
+      id:uid(),
+      title:'Revisar: '+d.accion_requerida.slice(0,80),
+      responsible:'',due_date:'',
+      priority:'alta',status:'pendiente',
+      category:'ia',tags:['ia','accion'],
+      created_by:'ia',source_doc:item.name
+    });
+    applied.push('⚠ Acción pendiente creada');
+  }
+
+  // ─── 11. HISTORIAL ───────────────────────────────────
   if(!p.ia_context)p.ia_context={imported_docs:[]};
   if(!p.ia_context.imported_docs)p.ia_context.imported_docs=[];
-  p.ia_context.imported_docs.push({title:d.titulo||item.name,type:d.tipo_documento,date:TODAY});
+  p.ia_context.imported_docs.push({
+    title:docName,type:d.tipo_documento,
+    category:docCategory,date:TODAY,
+    applied_actions:applied
+  });
+
   try{kbExtractFromDoc(d,p.meta);}catch(e){}
+
+  return applied; // Return what was applied for UI display
 }
 
 function iaHandleDrop(e){e.preventDefault();iaBatchDrop(e);}
