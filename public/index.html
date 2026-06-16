@@ -4353,6 +4353,13 @@ function renderIAImport(){
     <div style="background:var(--green-bg);border-radius:var(--r);padding:10px 14px;margin-bottom:14px;font-size:12px;color:#15803D">
       Arrastra todos los documentos juntos. La IA los analiza uno a uno automáticamente y los aplica al proyecto.
     </div>
+    <div style="margin-bottom:14px">
+      <label class="form-label">🔑 API Key de Anthropic <span style="font-weight:400;color:var(--muted)">(se guarda solo en este navegador)</span></label>
+      <input type="password" id="ia-api-key" placeholder="sk-ant-..." value="${localStorage.getItem('tramaos_api_key')||''}"
+        oninput="localStorage.setItem('tramaos_api_key',this.value)"
+        style="font-family:monospace">
+      <div style="font-size:11px;color:var(--muted);margin-top:4px">Necesaria para que la IA procese documentos. Consigue una en <a href="https://console.anthropic.com" target="_blank" style="color:var(--slate)">console.anthropic.com</a></div>
+    </div>
     <div id="ia-dropzone" style="border:2px dashed var(--border);border-radius:var(--r);padding:32px;text-align:center;cursor:pointer;margin-bottom:14px;transition:all .15s;min-height:140px;display:flex;flex-direction:column;align-items:center;justify-content:center"
       onclick="document.getElementById('ia-file-in').click()"
       ondrop="iaBatchDrop(event)"
@@ -4372,13 +4379,17 @@ function renderIAImport(){
       <div><label class="form-label">Tipo por defecto</label>
         <select id="ia-doc-type">
           <option value="auto">🤖 Auto-detectar</option>
-          <option value="seguro">🛡️ Seguro RC</option>
+          <option value="presupuesto_obra">📊 Presupuesto de Obra (nuestro)</option>
+          <option value="presupuesto_proveedor">💬 Presupuesto Proveedor</option>
+          <option value="factura">💰 Factura</option>
+          <option value="albaran">📦 Albarán</option>
           <option value="contrato">📋 Contrato</option>
-          <option value="factura">💰 Factura/Presupuesto</option>
-          <option value="licencia">📜 Licencia</option>
+          <option value="licencia">📜 Licencia/Permiso</option>
           <option value="certificado">✅ Certificado</option>
-          <option value="plano">📐 Plano/Memoria</option>
-          <option value="albarán">📦 Albarán</option>
+          <option value="seguro">🛡️ Seguro RC</option>
+          <option value="cronograma">📅 Cronograma</option>
+          <option value="plano_arquitectura">📐 Plano Arquitectura</option>
+          <option value="plano_especialidad">🔧 Plano Especialidad</option>
         </select>
       </div>
       <div><label class="form-label">Instrucción adicional (opcional)</label>
@@ -4521,7 +4532,7 @@ Proveedores actuales: ${existingProviders}.
 Analiza el documento y extrae TODA la información posible. Responde SOLO con JSON válido, sin markdown, sin texto adicional:
 
 {
-  "tipo_documento": "presupuesto_proveedor|factura|pago|contrato|permiso|licencia|certificado|plano_arquitectura|plano_especialidad|email|acta_reunion|informe|seguro|albarán|nomina|otro",
+  "tipo_documento": "presupuesto_obra|presupuesto_proveedor|factura|albaran|pago|contrato|permiso|licencia|certificado|plano_arquitectura|plano_especialidad|cronograma|email|acta_reunion|informe|seguro|nomina|otro",
   "subtipo": "planta|seccion|alzado|detalle|estructura|electricidad|fontaneria|avac|telecomunicaciones|paisajismo|seguridad|otro",
   "titulo": "",
   "resumen": "",
@@ -4605,15 +4616,20 @@ Analiza el documento y extrae TODA la información posible. Responde SOLO con JS
 }
 
 REGLAS IMPORTANTES:
-- Si ves un email o comunicación de cliente → comunicacion.es_comunicacion=true, extrae puntos clave como notas
-- Si ves una factura o recibo → pago_o_factura.es_pago=true
-- Si ves un presupuesto de proveedor → presupuesto.es_presupuesto=true Y proveedor.detectado=true
-- Si el documento requiere acción o respuesta → requiere_accion=true y describe la acción
-- Detecta el capítulo de presupuesto más cercano basándote en el contenido
-- Si ves fechas límite importantes → crea alertas
-- Para planos: detecta si es arquitectura o especialidad y qué tipo
-- Para contratos: extrae partes, objeto, importes y fechas clave
-- Para actas: extrae decisiones y genera tareas para cada acuerdo
+- PRESUPUESTO DE OBRA (presupuesto_obra): documento emitido POR el arquitecto/studio/contratista AL cliente, con partidas numeradas, capítulos, totales con IVA. Ej: presupuesto TRIB3, presupuesto reforma, presupuesto de ejecución.
+- PRESUPUESTO DE PROVEEDOR (presupuesto_proveedor): cotización recibida DE un proveedor externo (fontanero, electricista, suministrador) para el estudio o para la obra.
+- Si ves un presupuesto de obra → tipo=presupuesto_obra, presupuesto.es_presupuesto=true. Extrae TODOS los capítulos en "partidas" con su importe total. El "proveedor" es el emisor (el studio).
+- Si ves un presupuesto de proveedor → presupuesto.es_presupuesto=true Y proveedor.detectado=true.
+- Para chapter_sugerido: usa EXACTAMENTE el número y nombre del capítulo más relevante tal como aparece en el presupuesto (ej: "3 INSONORIZACIÓN", "4 INSTALACIONES").
+- Si ves un email o comunicación de cliente → comunicacion.es_comunicacion=true, extrae puntos clave como notas.
+- Si ves una factura o recibo → pago_o_factura.es_pago=true.
+- Si el documento requiere acción o respuesta → requiere_accion=true y describe la acción.
+- Si ves fechas límite importantes → crea alertas.
+- Para planos: detecta si es arquitectura o especialidad y qué tipo.
+- Para contratos: extrae partes, objeto, importes y fechas clave.
+- Para actas: extrae decisiones y genera tareas para cada acuerdo.
+- Para cronogramas: extrae cada fase/etapa en cronograma.fases_detectadas con nombre, mes_inicio y duración estimada.
+- Si el importe_total es 0 pero hay partidas, suma las partidas para obtener el total.
 - Tipo de documento: ${document.getElementById('ia-doc-type')?.value||'auto'}
 - Instrucción extra: ${document.getElementById('ia-extra')?.value||'ninguna'}`;
 
@@ -4626,9 +4642,11 @@ REGLAS IMPORTANTES:
   }
   content.push({type:'text',text:'Analiza este documento exhaustivamente y devuelve el JSON completo.'});
 
-  const res=await fetch('/api/chat',{
+  const apiKey=localStorage.getItem('tramaos_api_key')||(document.getElementById('ia-api-key')?.value||'');
+  if(!apiKey){throw new Error('Falta la API Key de Anthropic. Añádela arriba en el campo API Key.');}
+  const res=await fetch('https://api.anthropic.com/v1/messages',{
     method:'POST',
-    headers:{'Content-Type':'application/json'},
+    headers:{'Content-Type':'application/json','anthropic-version':'2023-06-01','x-api-key':apiKey,'anthropic-dangerous-direct-browser-access':'true'},
     body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:2500,system:sys,messages:[{role:'user',content}]})
   });
   if(!res.ok){const e=await res.json();throw new Error(e.error?.message||'Error '+res.status);}
@@ -4636,6 +4654,28 @@ REGLAS IMPORTANTES:
   const raw=data.content[0]?.text||'';
   const m=raw.match(/\{[\s\S]*\}/);
   return JSON.parse(m?m[0]:raw);
+}
+
+
+function findBestChapter(budget, suggested){
+  if(!suggested||!budget?.length)return null;
+  const s=suggested.toLowerCase().trim();
+  // 1. Match by number prefix (e.g. "3" or "3." at start)
+  const numMatch=s.match(/^(\d+)/);
+  if(numMatch){
+    const n=parseInt(numMatch[1]);
+    const byNum=budget.find(b=>b.num===n||(b.num&&parseInt(b.num)===n));
+    if(byNum)return byNum;
+  }
+  // 2. Score all chapters by word overlap
+  const sWords=s.split(/\s+/).filter(w=>w.length>3);
+  let best=null,bestScore=0;
+  budget.forEach(b=>{
+    const bw=b.desc.toLowerCase().split(/\s+/);
+    const score=sWords.reduce((acc,w)=>acc+(bw.some(bwi=>bwi.includes(w)||w.includes(bwi))?1:0),0);
+    if(score>bestScore){bestScore=score;best=b;}
+  });
+  return bestScore>0?best:null;
 }
 
 function iaBatchApplyOne(d,item){
@@ -4650,10 +4690,13 @@ function iaBatchApplyOne(d,item){
     plano_arquitectura:'arquitectura',
     plano_especialidad:'especialidades',
     permiso:'licencias',licencia:'licencias',certificado:'licencias',
-    seguro:'seguros',contrato:'contratos',
-    factura:'pagos',pago:'pagos',albarán:'pagos',
+    seguro:'seguros',
+    contrato:'contratos',presupuesto_proveedor:'contratos',
+    factura:'pagos',pago:'pagos',albaran:'pagos',albarán:'pagos',
+    presupuesto_obra:'presupuestos',
+    cronograma:'cronograma',
     email:'comunicaciones',acta_reunion:'comunicaciones',
-    informe:'informes',presupuesto_proveedor:'contratos'
+    informe:'informes'
   }[d.tipo_documento]||d.categoria_documento||'otros';
 
   const docName=d.titulo||item.name||'Documento IA';
@@ -4710,10 +4753,7 @@ function iaBatchApplyOne(d,item){
   // ─── 3. PRESUPUESTO DE PROVEEDOR ─────────────────────
   if(pres.es_presupuesto&&pres.total>0){
     // Encontrar capítulo más cercano
-    const chapDesc=(pres.chapter_sugerido||'').toLowerCase();
-    const cap=p.budget.find(b=>
-      chapDesc&&(b.desc.toLowerCase().includes(chapDesc.slice(0,12))||chapDesc.includes(b.desc.toLowerCase().slice(0,8)))
-    );
+    const cap=findBestChapter(p.budget, pres.chapter_sugerido||'');
     if(provRef){
       if(!provRef.quotes)provRef.quotes=[];
       provRef.quotes.push({
@@ -4731,12 +4771,33 @@ function iaBatchApplyOne(d,item){
     else{applied.push('◈ Cotización '+fmt(pres.total,cur)+' (capítulo por asignar)');}
   }
 
+  // ─── 3B. PRESUPUESTO DE OBRA (emitido por el studio al cliente) ─────
+  if(d.tipo_documento==='presupuesto_obra'&&pres.es_presupuesto){
+    const totalObra=pres.total||pres.partidas?.reduce((s,pt)=>s+(pt.total||0),0)||main.importe||0;
+    if(p.budget.length===0&&pres.partidas?.length){
+      pres.partidas.forEach((pt,i)=>{
+        p.budget.push({id:uid(),num:i+1,desc:pt.descripcion||'Capítulo '+(i+1),budget:pt.total||0,paid:0,currency:cur,notes:'Importado IA',created_by:'ia'});
+      });
+      applied.push('\u25c8 '+pres.partidas.length+' capítulos creados en presupuesto');
+    } else if(pres.partidas?.length){
+      pres.partidas.forEach(pt=>{
+        const cap2=findBestChapter(p.budget,pt.descripcion||'');
+        if(cap2&&!(cap2.budget>0)){cap2.budget=pt.total||0;}
+      });
+      applied.push('\u25c8 Presupuesto de obra sincronizado con capítulos');
+    }
+    if(totalObra>0&&!(p.client_billing?.base_amount>0)){
+      if(!p.client_billing)p.client_billing={};
+      p.client_billing.base_amount=totalObra;p.client_billing.currency=cur;
+      applied.push('\U0001f4bc Precio cliente actualizado: '+fmt(totalObra,cur));
+    }
+  }
+
   // ─── 4. FACTURA / PAGO ───────────────────────────────
   const pf=d.pago_o_factura||{};
   if(pf.es_pago&&pf.importe>0){
     // Buscar capítulo
-    const chapDesc=(pf.chapter_sugerido||'').toLowerCase();
-    const cap=p.budget.find(b=>chapDesc&&b.desc.toLowerCase().includes(chapDesc.slice(0,10)));
+    const cap=findBestChapter(p.budget, pf.chapter_sugerido||'');
     // Buscar proveedor por nombre
     const payProv=pf.proveedor_nombre?p.providers.find(pv=>pv.name.toLowerCase().includes(pf.proveedor_nombre.toLowerCase().slice(0,8))):null;
     const payId=uid();
