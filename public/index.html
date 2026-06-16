@@ -4616,21 +4616,20 @@ Analiza el documento y extrae TODA la información posible. Responde SOLO con JS
 }
 
 REGLAS IMPORTANTES:
-- PRESUPUESTO DE OBRA (presupuesto_obra): documento emitido POR el arquitecto/studio/contratista AL cliente, con partidas numeradas, capítulos, totales con IVA. Ej: presupuesto TRIB3, presupuesto reforma, presupuesto de ejecución.
-- PRESUPUESTO DE PROVEEDOR (presupuesto_proveedor): cotización recibida DE un proveedor externo (fontanero, electricista, suministrador) para el estudio o para la obra.
-- Si ves un presupuesto de obra → tipo=presupuesto_obra, presupuesto.es_presupuesto=true. Extrae TODOS los capítulos en "partidas" con su importe total. El "proveedor" es el emisor (el studio).
-- Si ves un presupuesto de proveedor → presupuesto.es_presupuesto=true Y proveedor.detectado=true.
-- Para chapter_sugerido: usa EXACTAMENTE el número y nombre del capítulo más relevante tal como aparece en el presupuesto (ej: "3 INSONORIZACIÓN", "4 INSTALACIONES").
-- Si ves un email o comunicación de cliente → comunicacion.es_comunicacion=true, extrae puntos clave como notas.
+- PRESUPUESTO DE OBRA (presupuesto_obra): emitido POR el arquitecto/studio/contratista AL cliente final. Señales clave: (1) nombre del studio o despacho en el encabezado como EMISOR; (2) estructura con capítulos numerados (01 Demolición, 02 Estructura…); (3) importe a escala de proyecto completo; (4) receptor es el propietario/cliente; (5) título incluye "Presupuesto de Obra", "PEM", "Presupuesto de Ejecución" o similar. → tipo=presupuesto_obra, presupuesto.es_presupuesto=true, proveedor.detectado=false. Extrae CADA capítulo en "partidas" (descripcion=nombre del capítulo, total=importe del capítulo).
+- PRESUPUESTO DE PROVEEDOR (presupuesto_proveedor): cotización/oferta recibida DE un tercero (empresa de fontanería, electricidad, carpintería, suministrador) para el studio o la obra. Señales: (1) empresa especializada en el encabezado como EMISOR; (2) cubre una especialidad única; (3) título con "Oferta", "Cotización", "Propuesta económica". → tipo=presupuesto_proveedor, presupuesto.es_presupuesto=true, proveedor.detectado=true.
+- CRITERIO DEFINITIVO: ¿Quién emite el documento? Si es el propio estudio de arquitectura → presupuesto_obra. Si es un tercero externo → presupuesto_proveedor. NUNCA los confundas.
+- Para chapter_sugerido: usa número y nombre exacto tal como aparece (ej: "3 INSONORIZACIÓN", "04 INSTALACIONES ELÉCTRICAS").
+- Si ves un email o comunicación → comunicacion.es_comunicacion=true, extrae puntos clave.
 - Si ves una factura o recibo → pago_o_factura.es_pago=true.
-- Si el documento requiere acción o respuesta → requiere_accion=true y describe la acción.
+- Si el documento requiere acción → requiere_accion=true y describe la acción.
 - Si ves fechas límite importantes → crea alertas.
 - Para planos: detecta si es arquitectura o especialidad y qué tipo.
 - Para contratos: extrae partes, objeto, importes y fechas clave.
 - Para actas: extrae decisiones y genera tareas para cada acuerdo.
-- Para cronogramas: extrae cada fase/etapa en cronograma.fases_detectadas con nombre, mes_inicio y duración estimada.
-- Si el importe_total es 0 pero hay partidas, suma las partidas para obtener el total.
-- Tipo de documento: ${document.getElementById('ia-doc-type')?.value||'auto'}
+- Para cronogramas: extrae cada fase en cronograma.fases_detectadas con nombre, mes_inicio y duración.
+- Si el total es 0 pero hay partidas, suma las partidas para calcular el total.
+- Tipo indicado por el usuario: ${document.getElementById('ia-doc-type')?.value||'auto'} (si es distinto de 'auto', úsalo como tipo_documento salvo evidencia contraria muy clara).
 - Instrucción extra: ${document.getElementById('ia-extra')?.value||'ninguna'}`;
 
   const content=[];
@@ -4659,19 +4658,20 @@ REGLAS IMPORTANTES:
 
 function findBestChapter(budget, suggested){
   if(!suggested||!budget?.length)return null;
-  const s=suggested.toLowerCase().trim();
-  // 1. Match by number prefix (e.g. "3" or "3." at start)
-  const numMatch=s.match(/^(\d+)/);
+  const norm=s=>s.normalize('NFD').replace(/[̀-ͯ]/g,'').toLowerCase().trim();
+  const s=norm(suggested);
+  // 1. Match by first number found anywhere in the suggestion
+  const numMatch=s.match(/(\d+)/);
   if(numMatch){
     const n=parseInt(numMatch[1]);
-    const byNum=budget.find(b=>b.num===n||(b.num&&parseInt(b.num)===n));
+    const byNum=budget.find(b=>parseInt(b.num)===n);
     if(byNum)return byNum;
   }
-  // 2. Score all chapters by word overlap
-  const sWords=s.split(/\s+/).filter(w=>w.length>3);
+  // 2. Score all chapters by word overlap (words > 2 chars to catch "gas", "red", etc.)
+  const sWords=s.split(/[\s\-_,;:]+/).filter(w=>w.length>2);
   let best=null,bestScore=0;
   budget.forEach(b=>{
-    const bw=b.desc.toLowerCase().split(/\s+/);
+    const bw=norm(b.desc).split(/[\s\-_,;:]+/);
     const score=sWords.reduce((acc,w)=>acc+(bw.some(bwi=>bwi.includes(w)||w.includes(bwi))?1:0),0);
     if(score>bestScore){bestScore=score;best=b;}
   });
@@ -4780,16 +4780,19 @@ function iaBatchApplyOne(d,item){
       });
       applied.push('\u25c8 '+pres.partidas.length+' capítulos creados en presupuesto');
     } else if(pres.partidas?.length){
+      let updatedCaps=0;
       pres.partidas.forEach(pt=>{
         const cap2=findBestChapter(p.budget,pt.descripcion||'');
-        if(cap2&&!(cap2.budget>0)){cap2.budget=pt.total||0;}
+        if(cap2&&pt.total>0){cap2.budget=pt.total;updatedCaps++;}
       });
-      applied.push('\u25c8 Presupuesto de obra sincronizado con capítulos');
+      if(updatedCaps)applied.push('\u25c8 '+updatedCaps+' capítulo(s) de presupuesto actualizados');
+      else applied.push('\u25c8 Presupuesto de obra registrado (capítulos sin emparejar)');
     }
-    if(totalObra>0&&!(p.client_billing?.base_amount>0)){
-      if(!p.client_billing)p.client_billing={};
-      p.client_billing.base_amount=totalObra;p.client_billing.currency=cur;
-      applied.push('\U0001f4bc Precio cliente actualizado: '+fmt(totalObra,cur));
+    if(totalObra>0){
+      if(!p.client_billing)p.client_billing={base_amount:0,extras:[],notes:''};
+      p.client_billing.base_amount=totalObra;
+      p.client_billing.currency=cur;
+      applied.push('💼 Precio cliente actualizado: '+fmt(totalObra,cur));
     }
   }
 
