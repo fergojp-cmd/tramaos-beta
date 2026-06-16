@@ -4342,149 +4342,214 @@ function saveNote(){
 // ══════════════════════════════════════════════════════
 // IA IMPORT
 // ══════════════════════════════════════════════════════
-let _iaImportFile=null,_iaImportB64=null,_iaImportType=null,_iaExtracted=null;
-
 function renderIAImport(){
+  const p=getProject();
+  const history=(p.ia_context?.imported_docs||[]).slice().reverse();
   document.getElementById('page-ia-import').innerHTML=`
-  <div class="grid-2">
-    <div class="card">
-      <div class="card-title" style="color:var(--green)">✦ Importar documento con IA</div>
-      <div style="background:var(--green-bg);border-radius:var(--r);padding:12px;margin-bottom:14px;font-size:12px;color:#15803D">
-        Sube cualquier PDF, imagen o doc. La IA extrae datos y actualiza el proyecto automáticamente.
-      </div>
-      <div id="ia-dropzone" style="border:2px dashed var(--border);border-radius:var(--r);padding:28px;text-align:center;cursor:pointer;margin-bottom:14px;transition:all .15s" onclick="document.getElementById('ia-file-in').click()" ondrop="iaHandleDrop(event)" ondragover="event.preventDefault();this.style.borderColor='var(--green)'" ondragleave="this.style.borderColor='var(--border)'">
-        <div style="font-size:32px;margin-bottom:8px">📄</div>
-        <div style="font-weight:500">Arrastra o haz clic</div>
-        <div style="font-size:12px;color:var(--muted);margin-top:4px">PDF · Imágenes · hasta 20 MB</div>
-        <div id="ia-file-name" style="font-size:12px;color:var(--blue);margin-top:6px;font-weight:500"></div>
-      </div>
-      <input type="file" id="ia-file-in" accept=".pdf,image/*" style="display:none" onchange="iaHandleFile(this)">
-      <div class="form-group"><label class="form-label">Tipo de documento</label>
-        <select id="ia-doc-type"><option value="auto">🤖 Auto-detectar</option><option value="seguro">🛡️ Seguro RC</option><option value="contrato">📋 Contrato</option><option value="factura">💰 Factura/Presupuesto</option><option value="licencia">📜 Licencia/Declaración</option><option value="certificado">✅ Certificado</option><option value="plano">📐 Plano/Memoria</option><option value="albarán">📦 Albarán/Entrega</option></select>
-      </div>
-      <div class="form-group"><label class="form-label">Instrucción adicional (opcional)</label>
-        <input id="ia-extra" placeholder="Ej: Este seguro es para el topógrafo">
-      </div>
-      <button id="ia-analyze-btn" class="btn btn-green" style="width:100%;padding:10px" onclick="iaAnalyze()" disabled>✦ Analizar con IA</button>
-  
+  <div class="card" style="margin-bottom:14px">
+    <div class="card-title" style="color:var(--green)">✦ Importar documentos con IA
+      <span style="font-size:12px;font-weight:400;color:var(--muted)">Hasta 20 documentos a la vez</span>
     </div>
-    <div class="card">
-      <div class="card-title">Datos extraídos <span id="ia-status" class="badge b-gray">Esperando</span></div>
-      <div id="ia-result" style="min-height:200px"><div style="color:var(--muted);text-align:center;padding:32px"><div style="font-size:32px;margin-bottom:8px">🔍</div>Los datos aparecerán aquí.</div></div>
-      <div id="ia-apply-zone" style="display:none;margin-top:14px;border-top:1px solid var(--border);padding-top:14px">
-        <div style="font-size:12px;font-weight:500;margin-bottom:10px">Selecciona qué aplicar:</div>
-        <div id="ia-apply-checks"></div>
-        <div style="display:flex;gap:8px;margin-top:12px">
-          <button class="btn btn-ghost" style="flex:1" onclick="iaReset()">✕ Descartar</button>
-          <button class="btn btn-green" style="flex:1" onclick="iaApply()">✓ Aplicar al proyecto</button>
-        </div>
+    <div style="background:var(--green-bg);border-radius:var(--r);padding:10px 14px;margin-bottom:14px;font-size:12px;color:#15803D">
+      Arrastra todos los documentos juntos. La IA los analiza uno a uno automáticamente y los aplica al proyecto.
+    </div>
+    <div id="ia-dropzone" style="border:2px dashed var(--border);border-radius:var(--r);padding:32px;text-align:center;cursor:pointer;margin-bottom:14px;transition:all .15s;min-height:140px;display:flex;flex-direction:column;align-items:center;justify-content:center"
+      onclick="document.getElementById('ia-file-in').click()"
+      ondrop="iaBatchDrop(event)"
+      ondragover="event.preventDefault();this.style.borderColor='var(--green)';this.style.background='var(--green-bg)'"
+      ondragleave="this.style.borderColor='var(--border)';this.style.background='transparent'">
+      <div style="font-size:40px;margin-bottom:10px">📂</div>
+      <div style="font-weight:600;font-size:15px">Arrastra aquí todos tus documentos</div>
+      <div style="font-size:13px;color:var(--muted);margin-top:6px">PDF · JPG · PNG — hasta 20 archivos a la vez</div>
+      <div id="ia-batch-count" style="margin-top:10px;font-size:13px;font-weight:600;color:var(--green)"></div>
+    </div>
+    <input type="file" id="ia-file-in" accept=".pdf,image/*" multiple style="display:none" onchange="iaBatchSelect(this)">
+    <div id="ia-queue" style="display:none;margin-bottom:14px">
+      <div style="font-size:13px;font-weight:600;margin-bottom:8px">Documentos en cola:</div>
+      <div id="ia-queue-list" style="display:flex;flex-direction:column;gap:6px"></div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px">
+      <div><label class="form-label">Tipo por defecto</label>
+        <select id="ia-doc-type">
+          <option value="auto">🤖 Auto-detectar</option>
+          <option value="seguro">🛡️ Seguro RC</option>
+          <option value="contrato">📋 Contrato</option>
+          <option value="factura">💰 Factura/Presupuesto</option>
+          <option value="licencia">📜 Licencia</option>
+          <option value="certificado">✅ Certificado</option>
+          <option value="plano">📐 Plano/Memoria</option>
+          <option value="albarán">📦 Albarán</option>
+        </select>
+      </div>
+      <div><label class="form-label">Instrucción adicional (opcional)</label>
+        <input id="ia-extra" placeholder="Ej: Todos son presupuestos de proveedores">
       </div>
     </div>
+    <button id="ia-batch-btn" class="btn btn-green" style="width:100%;padding:12px;font-size:14px;display:none" onclick="iaBatchStart()">
+      ✦ Analizar todos los documentos con IA
+    </button>
+  </div>
+  <div id="ia-batch-progress" style="display:none" class="card">
+    <div class="card-title">Procesando documentos <span id="ia-batch-status" class="badge b-blue">En proceso</span></div>
+    <div style="margin-bottom:12px">
+      <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--muted);margin-bottom:4px">
+        <span id="ia-batch-current-label">Preparando...</span>
+        <span id="ia-batch-counter">0 / 0</span>
+      </div>
+      <div style="height:8px;background:#F3F4F6;border-radius:4px;overflow:hidden">
+        <div id="ia-batch-bar" style="height:100%;width:0%;background:var(--green);border-radius:4px;transition:width .4s"></div>
+      </div>
+    </div>
+    <div id="ia-batch-results" style="display:flex;flex-direction:column;gap:6px;max-height:300px;overflow-y:auto"></div>
   </div>
   <div class="card" style="margin-top:14px">
-    <div class="card-title">Historial de importaciones IA</div>
-    <div id="ia-history">${(getProject().ia_context?.imported_docs||[]).length?
-      getProject().ia_context.imported_docs.slice().reverse().map(d=>`<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border2);font-size:13px"><span>📄</span><div style="flex:1"><div style="font-weight:500">${d.title}</div><div style="font-size:11px;color:var(--muted)">${d.type} · ${d.date}</div></div><span class="badge b-green">Aplicado</span></div>`).join('')
-      :'<div style="color:var(--muted);font-size:13px">Sin importaciones previas</div>'}</div>`;
+    <div class="card-title">Historial de importaciones IA
+      <span style="font-size:12px;font-weight:400;color:var(--muted)">${history.length} importado(s)</span>
+    </div>
+    <div>${history.length?history.map(d=>`
+      <div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border2);font-size:13px">
+        <span>📄</span><div style="flex:1"><div style="font-weight:500">${d.title||'Documento'}</div>
+        <div style="font-size:11px;color:var(--muted)">${d.type||''} · ${d.date}</div></div>
+        <span class="badge b-green">✓ Aplicado</span>
+      </div>`).join(''):'<div style="color:var(--muted);font-size:13px;padding:8px 0">Sin importaciones previas</div>'}</div>
+  </div>`;
 }
 
-function iaHandleDrop(e){e.preventDefault();document.getElementById('ia-dropzone').style.borderColor='var(--border)';iaProcessFile(e.dataTransfer.files[0]);}
-function iaHandleFile(input){if(input.files[0])iaProcessFile(input.files[0]);}
-function iaProcessFile(file){
-  _iaImportFile=file;_iaImportType=file.type;
-  document.getElementById('ia-file-name').textContent='📎 '+file.name;
-  document.getElementById('ia-analyze-btn').disabled=false;
-  document.getElementById('ia-analyze-btn').textContent='✦ Analizar: '+file.name;
-  const r=new FileReader();r.onload=e=>{_iaImportB64=e.target.result.split(',')[1];};r.readAsDataURL(file);
+let _iaBatchQueue=[];
+let _iaBatchProcessing=false;
+
+function iaBatchDrop(e){
+  e.preventDefault();
+  const dz=document.getElementById('ia-dropzone');
+  dz.style.borderColor='var(--border)';dz.style.background='transparent';
+  iaBatchLoadFiles(Array.from(e.dataTransfer.files));
+}
+function iaBatchSelect(input){iaBatchLoadFiles(Array.from(input.files));}
+
+function iaBatchLoadFiles(files){
+  const valid=files.filter(f=>f.type.startsWith('image/')||f.type==='application/pdf');
+  if(!valid.length)return;
+  if(valid.length>20){showToast('Máximo 20 archivos. Se toman los primeros 20.','warning');valid.splice(20);}
+  _iaBatchQueue=[];
+  let loaded=0;
+  valid.forEach((file,i)=>{
+    const r=new FileReader();
+    r.onload=e=>{
+      _iaBatchQueue.push({id:'b'+i,name:file.name,type:file.type,b64:e.target.result.split(',')[1],status:'pending'});
+      loaded++;
+      if(loaded===valid.length)iaBatchRenderQueue();
+    };
+    r.readAsDataURL(file);
+  });
+  document.getElementById('ia-batch-count').textContent='✓ '+valid.length+' archivo(s) seleccionado(s)';
 }
 
-async function iaAnalyze(){
-  if(!_iaImportB64){alert('Selecciona un archivo.');return;}
-  const btn=document.getElementById('ia-analyze-btn');btn.disabled=true;btn.textContent='⟳ Analizando...';
-  document.getElementById('ia-status').textContent='Procesando...';document.getElementById('ia-status').className='badge b-blue';
+function iaBatchRenderQueue(){
+  const queueEl=document.getElementById('ia-queue');
+  const listEl=document.getElementById('ia-queue-list');
+  const btn=document.getElementById('ia-batch-btn');
+  queueEl.style.display='block';
+  btn.style.display='block';
+  btn.textContent='✦ Analizar '+_iaBatchQueue.length+' documento(s) con IA';
+  listEl.innerHTML=_iaBatchQueue.map(item=>`
+    <div id="queue-item-${item.id}" style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:#F9FAFB;border-radius:6px;font-size:13px">
+      <span>${item.type==='application/pdf'?'📄':'🖼️'}</span>
+      <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${item.name}</span>
+      <span id="queue-status-${item.id}" class="badge b-gray">En cola</span>
+    </div>`).join('');
+}
+
+async function iaBatchStart(){
+  if(_iaBatchProcessing||!_iaBatchQueue.length)return;
+  _iaBatchProcessing=true;
+  document.getElementById('ia-batch-progress').style.display='block';
+  document.getElementById('ia-batch-btn').disabled=true;
+  const total=_iaBatchQueue.length;
+  let done=0;let errors=0;
+  for(const item of _iaBatchQueue){
+    document.getElementById('ia-batch-current-label').textContent='Analizando: '+item.name;
+    document.getElementById('ia-batch-counter').textContent=(done+1)+' / '+total;
+    document.getElementById('ia-batch-bar').style.width=Math.round((done/total)*100)+'%';
+    const sb=document.getElementById('queue-status-'+item.id);
+    if(sb){sb.textContent='Analizando...';sb.className='badge b-blue';}
+    try{
+      const result=await iaBatchAnalyzeOne(item);
+      iaBatchApplyOne(result,item);
+      if(sb){sb.textContent='✓ Aplicado';sb.className='badge b-green';}
+      const resEl=document.getElementById('ia-batch-results');
+      const div=document.createElement('div');
+      div.style.cssText='display:flex;align-items:center;gap:8px;padding:8px 10px;background:var(--green-bg);border-radius:6px;font-size:12px;border-left:3px solid var(--green)';
+      div.innerHTML='<span>✓</span><div style="flex:1"><strong>'+item.name+'</strong><div style="color:var(--muted)">'+(result.tipo_documento||'documento')+(result.titulo?' — '+result.titulo:'')+'</div></div>';
+      resEl.appendChild(div);
+    }catch(err){
+      errors++;
+      if(sb){sb.textContent='✗ Error';sb.className='badge b-red';}
+      const resEl=document.getElementById('ia-batch-results');
+      const div=document.createElement('div');
+      div.style.cssText='display:flex;align-items:center;gap:8px;padding:8px 10px;background:var(--red-bg);border-radius:6px;font-size:12px;border-left:3px solid var(--red)';
+      div.innerHTML='<span>✗</span><strong>'+item.name+'</strong><span style="color:var(--muted);margin-left:6px">'+(err.message||'Error')+'</span>';
+      resEl.appendChild(div);
+    }
+    done++;
+    if(done<total)await new Promise(r=>setTimeout(r,800));
+  }
+  document.getElementById('ia-batch-bar').style.width='100%';
+  document.getElementById('ia-batch-counter').textContent=done+' / '+total;
+  document.getElementById('ia-batch-current-label').textContent='Completado — '+(done-errors)+' aplicados, '+errors+' errores';
+  document.getElementById('ia-batch-status').textContent=errors?errors+' error(s)':'Todo aplicado ✓';
+  document.getElementById('ia-batch-status').className=errors?'badge b-amber':'badge b-green';
+  document.getElementById('ia-batch-btn').disabled=false;
+  document.getElementById('ia-batch-btn').textContent='✦ Analizar más documentos';
+  _iaBatchProcessing=false;
+  saveProject();updateBadges();
+  showToast((done-errors)+' documento(s) importados','success',4000);
+  setTimeout(()=>renderIAImport(),1500);
+}
+
+async function iaBatchAnalyzeOne(item){
   const p=getProject();
-  const chaptersContext=p.budget.map(b=>`${b.num}: ${b.desc} (base: ${b.budget}€)`).join(', ');
-  const sys=`Eres el asistente del proyecto "${p.name}" (${p.meta?.city}, ${p.meta?.country}), coordinado por ${APP.workspace.owner}.
-
-Los capítulos de presupuesto del proyecto son: ${chaptersContext}
-
-Extrae TODA la información relevante del documento y responde SOLO con JSON válido sin markdown ni texto adicional:
-
-{
-  "tipo_documento": "presupuesto_proveedor|factura|contrato|licencia|certificado|seguro|plano|albarán|otro",
-  "titulo": "",
-  "resumen": "",
-  "datos_principales": {
-    "empresa_o_persona": "",
-    "numero_documento": "",
-    "fecha_emision": "",
-    "fecha_vencimiento": "",
-    "importe": 0,
-    "estado": ""
-  },
-  "presupuesto_proveedor": {
-    "es_presupuesto": false,
-    "proveedor": "",
-    "total": 0,
-    "validez": "",
-    "plazo_entrega": "",
-    "condiciones_pago": "",
-    "chapter_id_sugerido": "",
-    "chapter_desc_sugerida": "",
-    "partidas": [
-      {"descripcion": "", "cantidad": 0, "unidad": "", "precio_unitario": 0, "total": 0}
-    ]
-  },
-  "materiales": [
-    {"nombre": "", "marca": "", "categoria": "", "proveedor": "", "cantidad": 0, "unidad": "", "precio": 0, "confidence": "alta|media|baja"}
-  ],
-  "alertas_generadas": [
-    {"tipo": "", "descripcion": "", "fecha": "YYYY-MM-DD", "importe": 0, "prioridad": "Alta|Media|Baja"}
-  ],
-  "campos_actualizables": {
-    "nombre_tecnico": "",
-    "especialidad": "",
-    "apólice": "",
-    "capital_asegurado": 0,
-    "empresa_aseguradora": "",
-    "notas_adicionales": ""
-  }
-}
-
-IMPORTANTE para presupuestos de proveedor:
-- Si el documento es un presupuesto o cotización, pon "es_presupuesto": true
-- Detecta qué capítulo del proyecto corresponde y pon el chapter_id_sugerido (usa el número del capítulo: "b1", "b2", etc.) y chapter_desc_sugerida
-- Extrae todas las partidas con precio unitario si están disponibles
-- El campo "validez" es la fecha hasta la que es válida la oferta
-- El campo "plazo_entrega" es cuánto tarda en entregar/ejecutar
-
-Tipo indicado: ${document.getElementById('ia-doc-type').value}. Extra: ${document.getElementById('ia-extra').value||'ninguna'}`;
-
+  const chaptersContext=p.budget.map(b=>b.num+': '+b.desc+' (base: '+b.budget+'€)').join(', ');
+  const sys='Eres el asistente del proyecto "'+p.name+'" ('+p.meta?.city+', '+p.meta?.country+'), coordinado por '+APP.workspace.owner+'.\n\nCapítulos: '+chaptersContext+'\n\nExtrae información y responde SOLO con JSON válido sin markdown:\n{"tipo_documento":"presupuesto_proveedor|factura|contrato|licencia|certificado|seguro|plano|albarán|otro","titulo":"","resumen":"","datos_principales":{"empresa_o_persona":"","numero_documento":"","fecha_emision":"","fecha_vencimiento":"","importe":0,"estado":""},"presupuesto_proveedor":{"es_presupuesto":false,"proveedor":"","total":0,"validez":"","plazo_entrega":"","condiciones_pago":"","chapter_desc_sugerida":"","partidas":[]},"alertas_generadas":[{"tipo":"","descripcion":"","fecha":"YYYY-MM-DD","importe":0,"prioridad":"Alta|Media|Baja"}],"campos_actualizables":{"notas_adicionales":""}}\nTipo: '+(document.getElementById('ia-doc-type')?.value||'auto')+'. Extra: '+(document.getElementById('ia-extra')?.value||'ninguna');
   const content=[];
-  if(_iaImportType?.includes('pdf')){content.push({type:'document',source:{type:'base64',media_type:'application/pdf',data:_iaImportB64}});}
-  else{const mt=['image/jpeg','image/png','image/gif','image/webp'].includes(_iaImportType)?_iaImportType:'image/jpeg';content.push({type:'image',source:{type:'base64',media_type:mt,data:_iaImportB64}});}
-  content.push({type:'text',text:'Analiza este documento del proyecto y devuelve el JSON.'});
-
-  try{
-    const res=await fetch('/api/chat',{
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:2000,system:sys,messages:[{role:'user',content}]})
-    });
-    if(!res.ok){const err=await res.json();throw new Error(err.error?.message||'API Error '+res.status);}
-    const data=await res.json();
-    const raw=data.content[0]?.text||'';
-    const m=raw.match(/\{[\s\S]*\}/);
-    _iaExtracted=JSON.parse(m?m[0]:raw);
-    iaRenderResult(_iaExtracted);
-    document.getElementById('ia-status').textContent='✓ Completado';document.getElementById('ia-status').className='badge b-green';
-  }catch(e){
-    document.getElementById('ia-result').innerHTML=`<div style="color:var(--red);padding:12px;background:var(--red-bg);border-radius:var(--r)"><strong>Error:</strong> ${e.message}</div>`;
-    document.getElementById('ia-status').textContent='Error';document.getElementById('ia-status').className='badge b-red';
-  }
-  btn.disabled=false;btn.textContent='✦ Analizar otro';
+  if(item.type==='application/pdf'){content.push({type:'document',source:{type:'base64',media_type:'application/pdf',data:item.b64}});}
+  else{const mt=['image/jpeg','image/png','image/gif','image/webp'].includes(item.type)?item.type:'image/jpeg';content.push({type:'image',source:{type:'base64',media_type:mt,data:item.b64}});}
+  content.push({type:'text',text:'Analiza este documento y devuelve el JSON.'});
+  const res=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:1500,system:sys,messages:[{role:'user',content}]})});
+  if(!res.ok){const e=await res.json();throw new Error(e.error?.message||'Error '+res.status);}
+  const data=await res.json();
+  const raw=data.content[0]?.text||'';
+  const m=raw.match(/\{[\s\S]*\}/);
+  return JSON.parse(m?m[0]:raw);
 }
 
+function iaBatchApplyOne(d,item){
+  const p=getProject();
+  const main=d.datos_principales||{};
+  const campos=d.campos_actualizables||{};
+  const pq=d.presupuesto_proveedor||{};
+  const ft=item.type==='application/pdf'?'pdf':'img';
+  p.documents.push({id:uid(),name:d.titulo||item.name||'Documento IA',category:pq.es_presupuesto?'contratos':'licencias',status:main.estado||'válido',file_data:item.b64,file_type:ft,file_size_kb:Math.round(atob(item.b64).length/1024),version:1,version_history:[],visible_client:false,notes:campos.notas_adicionales||'',ia_summary:d.resumen||'',uploaded_at:TODAY,expires_at:main.fecha_vencimiento||null,tags:['ia','batch']});
+  if(pq.es_presupuesto&&pq.total>0){
+    const provName=pq.proveedor||main.empresa_o_persona||'Proveedor IA';
+    let prov=p.providers.find(pv=>pv.name.toLowerCase().includes(provName.toLowerCase().slice(0,10)));
+    if(!prov){prov={id:uid(),scope:'project',name:provName,category:'importado-ia',location:{city:p.meta?.city||'',country:p.meta?.country||''},contact:{},status:'en_evaluacion',rating:null,notes:'Importado IA batch',quotes:[],origin:'ia'};p.providers.push(prov);}
+    if(!prov.quotes)prov.quotes=[];
+    const sc=p.budget.find(b=>b.desc?.toLowerCase().includes((pq.chapter_desc_sugerida||'').toLowerCase().slice(0,10)));
+    prov.quotes.push({id:uid(),amount:pq.total,chapter_id:sc?.id||'',chapter_desc:sc?.desc||pq.chapter_desc_sugerida||'',deadline:pq.plazo_entrega||'',valid_until:pq.validez||main.fecha_vencimiento||'',notes:pq.condiciones_pago||'',partidas:pq.partidas||[],status:'recibida',date:TODAY});
+    if(prov.status==='por_contactar')prov.status='en_evaluacion';
+  }
+  if(d.alertas_generadas?.length){d.alertas_generadas.forEach(a=>p.alerts.push({id:uid(),type:a.tipo||'Vencimiento',priority:a.prioridad||'Media',description:a.descripcion,due_date:a.fecha||'',amount:a.importe||0,currency:p.meta?.currency||'EUR',done:false,created_by:'ia-batch'}));}
+  if(!p.ia_context)p.ia_context={imported_docs:[]};
+  if(!p.ia_context.imported_docs)p.ia_context.imported_docs=[];
+  p.ia_context.imported_docs.push({title:d.titulo||item.name,type:d.tipo_documento,date:TODAY});
+  try{kbExtractFromDoc(d,p.meta);}catch(e){}
+}
+
+function iaHandleDrop(e){e.preventDefault();iaBatchDrop(e);}
+function iaHandleFile(input){iaBatchSelect(input);}
+function iaProcessFile(file){iaBatchLoadFiles([file]);}
+function iaReset(){_iaBatchQueue=[];_iaBatchProcessing=false;renderIAImport();}
+let _iaImportFile=null,_iaImportB64=null,_iaImportType=null,_iaExtracted=null;
 function iaRenderResult(d){
   const main=d.datos_principales||{};const campos=d.campos_actualizables||{};
   const pq=d.presupuesto_proveedor||{};
@@ -4600,7 +4665,7 @@ function iaApply(){
   iaReset();renderIAImport();
 }
 
-function iaReset(){_iaImportFile=null;_iaImportB64=null;_iaImportType=null;_iaExtracted=null;}
+// iaReset handled above
 
 // ══════════════════════════════════════════════════════
 // KNOWLEDGE BASE
