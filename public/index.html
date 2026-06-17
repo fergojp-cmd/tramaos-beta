@@ -4249,39 +4249,117 @@ function renderReports(){
 // ══════════════════════════════════════════════════════
 // ALERTS
 // ══════════════════════════════════════════════════════
+let _alertF={priority:'',status:'',date:''};
+
 function renderAlerts(){
   const p=getProject();
-  const active=p.alerts.filter(a=>!a.done);
-  const done=p.alerts.filter(a=>a.done);
   const cur=p.meta?.currency||'EUR';
-
+  // Preserve filter state across re-renders
+  _alertF.priority=document.getElementById('al-f-priority')?.value??_alertF.priority;
+  _alertF.status=document.getElementById('al-f-status')?.value??_alertF.status;
+  _alertF.date=document.getElementById('al-f-date')?.value??_alertF.date;
+  // Normalize status from legacy done flag
+  p.alerts.forEach(a=>{if(!a.status)a.status=a.done?'hecho':'pendiente';});
+  // Apply filters
+  const today=new Date();today.setHours(0,0,0,0);
+  let filtered=p.alerts.filter(a=>{
+    if(_alertF.priority&&a.priority!==_alertF.priority)return false;
+    if(_alertF.status&&a.status!==_alertF.status)return false;
+    if(_alertF.date&&a.due_date){
+      const d=new Date(a.due_date);
+      if(_alertF.date==='vencida')return d<today;
+      const days=parseInt(_alertF.date);
+      if(days){const cut=new Date(today.getTime()+days*86400000);return d>=today&&d<=cut;}
+    } else if(_alertF.date&&!a.due_date)return false;
+    return true;
+  });
+  const active=filtered.filter(a=>a.status!=='hecho');
+  const done=filtered.filter(a=>a.status==='hecho');
+  const SS='font-size:11px;padding:3px 7px;border-radius:20px;border:1px solid;cursor:pointer;outline:none;background:#fff;font-weight:500;white-space:nowrap;flex-shrink:0;width:auto';
+  const PC={Alta:'border-color:#FCA5A5;color:#DC2626',Media:'border-color:#FCD34D;color:#D97706',Baja:'border-color:#86EFAC;color:#16A34A'};
+  const SC={pendiente:'border-color:#FCA5A5;color:#DC2626',en_proceso:'border-color:#FCD34D;color:#D97706',hecho:'border-color:#86EFAC;color:#16A34A'};
+  const row=a=>{
+    const s=a.status||'pendiente';
+    const pc=PC[a.priority]||PC.Baja;
+    const sc=SC[s]||SC.pendiente;
+    return `<div style="display:flex;align-items:flex-start;gap:8px;padding:10px 12px;background:#fff;border-radius:8px;border:1px solid var(--border2);margin-bottom:6px">
+      <select onchange="setAlertField('${a.id}','priority',this.value)" style="${SS};${pc}">
+        <option value="Alta"${a.priority==='Alta'?' selected':''}>🔴 Alta</option>
+        <option value="Media"${a.priority==='Media'?' selected':''}>🟡 Media</option>
+        <option value="Baja"${a.priority==='Baja'?' selected':''}>🟢 Baja</option>
+      </select>
+      <div style="flex:1;min-width:0;overflow:hidden">
+        <div style="font-size:13px;font-weight:500;margin-bottom:3px">
+          <span style="color:var(--muted);font-size:11px">${a.type} · </span><span contenteditable="true" onfocus="this.style.borderBottomColor='var(--blue)'" onblur="setAlertField('${a.id}','description',this.textContent.trim());this.style.borderBottomColor='transparent'" style="outline:none;border-bottom:1px dashed transparent;display:inline;word-break:break-word">${a.description}</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;font-size:11px;color:var(--muted)">
+          <input type="date" value="${a.due_date||''}" onchange="setAlertField('${a.id}','due_date',this.value)" style="font-size:11px;border:none;background:transparent;color:var(--muted);cursor:pointer;padding:0">
+          ${a.amount?'· '+fmt(a.amount,cur):''}
+        </div>
+      </div>
+      <select onchange="setAlertField('${a.id}','status',this.value)" style="${SS};${sc}">
+        <option value="pendiente"${s==='pendiente'?' selected':''}>● Pendiente</option>
+        <option value="en_proceso"${s==='en_proceso'?' selected':''}>◐ En proceso</option>
+        <option value="hecho"${s==='hecho'?' selected':''}>✓ Hecho</option>
+      </select>
+      <button onclick="deleteAlert('${a.id}')" style="font-size:14px;background:none;border:none;cursor:pointer;color:var(--muted);padding:2px 4px;line-height:1" title="Eliminar">✕</button>
+    </div>`;
+  };
+  const hasFilter=_alertF.priority||_alertF.status||_alertF.date;
   document.getElementById('page-alerts').innerHTML=`
-  <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:20px">
-    <div style="font-size:13px;font-weight:600;color:var(--ink);margin-bottom:4px">Activas (${active.length})</div>
-    ${active.map(a=>`
-      <div class="alert-row ${a.priority==='Alta'?'alert-high':a.priority==='Media'?'alert-med':'alert-low'}" style="justify-content:space-between">
-        <div style="display:flex;align-items:center;gap:10px;flex:1">
-          <span>${a.priority==='Alta'?'🔴':a.priority==='Media'?'🟡':'🟢'}</span>
-          <div>
-            <div style="font-weight:500">${a.type}: ${a.description}</div>
-            <div style="font-size:11px;color:var(--muted)">${a.due_date?fmtDate(a.due_date):''} ${a.amount?'· '+fmt(a.amount,cur):''}</div>
-          </div>
-        </div>
-        <div style="display:flex;gap:5px">
-          <button class="btn btn-xs b-green" onclick="toggleAlertDone('${a.id}')">✓ Hecho</button>
-          <button class="btn btn-xs btn-ghost" onclick="deleteAlert('${a.id}')">✕</button>
-        </div>
-      </div>`).join('')}
-    ${active.length===0?'<div style="color:var(--muted);padding:12px">Sin alertas activas 🎉</div>':''}
+  <div style="display:flex;gap:8px;align-items:center;padding:10px 14px;background:var(--bg2,#F9FAFB);border-radius:8px;margin-bottom:14px;flex-wrap:wrap">
+    <span style="font-size:12px;font-weight:600;color:var(--muted);white-space:nowrap">Filtrar:</span>
+    <select id="al-f-priority" onchange="renderAlerts()" style="font-size:12px;padding:4px 8px;border:1px solid var(--border);border-radius:6px;background:#fff;flex-shrink:0;width:auto">
+      <option value="">Todas prioridades</option>
+      <option value="Alta"${_alertF.priority==='Alta'?' selected':''}>🔴 Alta</option>
+      <option value="Media"${_alertF.priority==='Media'?' selected':''}>🟡 Media</option>
+      <option value="Baja"${_alertF.priority==='Baja'?' selected':''}>🟢 Baja</option>
+    </select>
+    <select id="al-f-status" onchange="renderAlerts()" style="font-size:12px;padding:4px 8px;border:1px solid var(--border);border-radius:6px;background:#fff;flex-shrink:0;width:auto">
+      <option value="">Todos estados</option>
+      <option value="pendiente"${_alertF.status==='pendiente'?' selected':''}>Pendiente</option>
+      <option value="en_proceso"${_alertF.status==='en_proceso'?' selected':''}>En proceso</option>
+      <option value="hecho"${_alertF.status==='hecho'?' selected':''}>Hecho</option>
+    </select>
+    <select id="al-f-date" onchange="renderAlerts()" style="font-size:12px;padding:4px 8px;border:1px solid var(--border);border-radius:6px;background:#fff;flex-shrink:0;width:auto">
+      <option value="">Cualquier fecha</option>
+      <option value="vencida"${_alertF.date==='vencida'?' selected':''}>Vencidas</option>
+      <option value="7"${_alertF.date==='7'?' selected':''}>Próx. 7 días</option>
+      <option value="30"${_alertF.date==='30'?' selected':''}>Próx. 30 días</option>
+      <option value="90"${_alertF.date==='90'?' selected':''}>Próx. 90 días</option>
+    </select>
+    ${hasFilter?`<button onclick="_alertF={priority:'',status:'',date:''};renderAlerts()" style="font-size:11px;padding:3px 8px;border:1px solid var(--border);border-radius:6px;background:#fff;cursor:pointer;color:var(--muted);flex-shrink:0">✕ Limpiar</button>`:''}
+    <span style="margin-left:auto;font-size:12px;color:var(--muted);white-space:nowrap">${filtered.length} alerta(s)</span>
   </div>
-  ${done.length?`<div style="font-size:13px;font-weight:600;color:var(--muted);margin-bottom:8px">Completadas (${done.length})</div>
-    ${done.map(a=>`<div style="display:flex;align-items:center;gap:8px;padding:8px;opacity:.55;font-size:13px;border-bottom:1px solid var(--border2)">
+  <div style="margin-bottom:20px">
+    <div style="font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:var(--ink);margin-bottom:8px">Activas (${active.length})</div>
+    ${active.map(row).join('')||'<div style="color:var(--muted);padding:12px 0;font-size:13px">Sin alertas activas 🎉</div>'}
+  </div>
+  ${done.length?`<div>
+    <div style="font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);margin-bottom:8px">Completadas (${done.length})</div>
+    ${done.map(a=>`<div style="display:flex;align-items:center;gap:8px;padding:8px 12px;opacity:.5;font-size:13px;border-bottom:1px solid var(--border2)">
       <span>✓</span><span style="flex:1;text-decoration:line-through">${a.type}: ${a.description}</span>
-      <button class="btn btn-xs btn-ghost" onclick="deleteAlert('${a.id}')">✕</button>
-    </div>`).join('')}`:''}`;
+      <select onchange="setAlertField('${a.id}','status',this.value)" style="font-size:11px;padding:2px 6px;border:1px solid #D1D5DB;border-radius:4px;background:#fff;cursor:pointer;width:auto;flex-shrink:0">
+        <option value="pendiente">● Pendiente</option>
+        <option value="en_proceso">◐ En proceso</option>
+        <option value="hecho" selected>✓ Hecho</option>
+      </select>
+      <button onclick="deleteAlert('${a.id}')" style="font-size:14px;background:none;border:none;cursor:pointer;color:var(--muted);padding:2px 4px" title="Eliminar">✕</button>
+    </div>`).join('')}
+  </div>`:''}`;
 }
 
-function toggleAlertDone(id){const p=getProject();const a=p.alerts.find(x=>x.id===id);if(a)a.done=!a.done;saveProject();updateBadges();renderAlerts();if(currentPage==='dashboard')renderDashboard();}
+function setAlertField(id,field,value){
+  if(field==='description'&&!value)return;
+  const p=getProject();
+  const a=p.alerts.find(x=>x.id===id);
+  if(!a)return;
+  if(field==='status'){a.status=value;a.done=(value==='hecho');}
+  else{a[field]=value;}
+  saveProject();updateBadges();renderAlerts();
+  if(currentPage==='dashboard')renderDashboard();
+}
+function toggleAlertDone(id){const p=getProject();const a=p.alerts.find(x=>x.id===id);if(a){a.done=!a.done;a.status=a.done?'hecho':'pendiente';}saveProject();updateBadges();renderAlerts();if(currentPage==='dashboard')renderDashboard();}
 function deleteAlert(id){if(confirm('¿Eliminar alerta?')){const p=getProject();p.alerts=p.alerts.filter(x=>x.id!==id);saveProject();updateBadges();renderAlerts();}}
 function saveAlert(){
   const p=getProject();
@@ -4434,11 +4512,11 @@ function iaBatchLoadFiles(files){
   const valid=files.filter(f=>f.type.startsWith('image/')||f.type==='application/pdf');
   if(!valid.length)return;
   if(valid.length>20){showToast('Máximo 20 archivos. Se toman los primeros 20.','warning');valid.splice(20);}
-  // Vercel serverless body limit es 12MB (config) — base64 aumenta ~33%, margen seguro: 8MB
-  const MAX_BYTES=8*1024*1024;
+  // Límite real de Vercel: 4.5MB — umbral conservador 4MB
+  const MAX_BYTES=4*1024*1024;
   const oversized=valid.filter(f=>f.size>MAX_BYTES);
   if(oversized.length){
-    showToast('⚠ '+oversized.length+' archivo(s) >8MB omitido(s): '+oversized.map(f=>f.name).join(', '),'warning',7000);
+    oversized.forEach(f=>showToast('⚠ '+f.name+' ('+(f.size/1024/1024).toFixed(1)+'MB) es demasiado grande — comprime el PDF antes de subirlo.','warning',8000));
     valid.splice(0,valid.length,...valid.filter(f=>f.size<=MAX_BYTES));
   }
   if(!valid.length)return;
