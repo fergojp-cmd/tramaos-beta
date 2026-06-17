@@ -467,10 +467,29 @@ input:focus,select:focus,textarea:focus{border-color:var(--slate);box-shadow:0 0
         </div>
       </div>
       <div class="form-row">
-        <div><label class="form-label">Fecha inicio</label><input id="np-start" type="date"></div>
-        <div><label class="form-label">Fecha fin estimada</label><input id="np-end" type="date" onchange="autoDetectScale()"></div>
+        <div><label class="form-label">Fecha inicio obra</label><input id="np-start" type="date" onchange="calcNpEndDate()"></div>
+        <div><label class="form-label">Fecha fin estimada <span style="font-size:10px;color:var(--muted)">(auto)</span></label><input id="np-end" type="date" onchange="autoDetectScale()"></div>
       </div>
       <div class="form-row">
+        <div>
+          <label class="form-label">⚒ Duración obra (semanas)</label>
+          <input type="number" id="np-obra-weeks" value="12" min="1" oninput="calcNpEndDate()">
+        </div>
+        <div>
+          <label class="form-label">Pre/Post obra</label>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
+            <div>
+              <label style="font-size:11px;color:var(--muted);display:block;margin-bottom:3px">Pre-obra (sem.)</label>
+              <input type="number" id="np-pre-weeks" value="1" min="0" oninput="calcNpEndDate()">
+            </div>
+            <div>
+              <label style="font-size:11px;color:var(--muted);display:block;margin-bottom:3px">Post-obra (sem.)</label>
+              <input type="number" id="np-post-weeks" value="1" min="0" oninput="calcNpEndDate()">
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="form-row" style="display:none">
         <div>
           <label class="form-label">Duración estimada</label>
           <div style="display:flex;gap:8px">
@@ -1531,59 +1550,74 @@ function renderSchedule() {
   const scale = getScheduleScale(p);
   const isWeeks = scale==='weeks';
   const TOTAL = getScheduleTotal(p,scale);
-  const unitLabel = isWeeks?'S':'M'; // S1..S12 o M1..M18
+  const unitLabel = isWeeks?'S':'M';
   const unitName = isWeeks?'semana':'mes';
   const unitPl = isWeeks?'semanas':'meses';
-  const unitProgress = Math.round((p.progress||0)/100*TOTAL);
   const activeTab = window._scheduleTab||'gantt';
   const statusColors = {pendiente:'#9CA3AF',en_curso:'#2563EB',completado:'#16A34A',retrasado:'#DC2626',pausado:'#D97706'};
+  const zoneMeta = {pre:{label:'PRE-OBRA',bg:'#F3F4F6',color:'#6B7280',border:'#D1D5DB'},obra:{label:'OBRA',bg:'#EFF6FF',color:'#1D4ED8',border:'#BFDBFE'},post:{label:'POST-OBRA',bg:'#F0FDF4',color:'#15803D',border:'#BBF7D0'}};
 
-  // Header con unidades
-  let header = `<div style="display:grid;grid-template-columns:160px 1fr;gap:6px;margin-bottom:6px"><div></div><div class="g-months" style="grid-template-columns:repeat(${TOTAL},1fr)">`;
+  // Auto-progress from completed phases
+  const totalPhases=p.schedule.length;
+  const donePhases=p.schedule.filter(t=>t.status==='completado').length;
+  const autoPct=totalPhases>0?Math.round(donePhases/totalPhases*100):p.progress||0;
+  const unitProgress=Math.round(autoPct/100*TOTAL);
+
+  // Gantt header
+  let header=`<div style="display:grid;grid-template-columns:180px 1fr;gap:6px;margin-bottom:4px"><div></div><div class="g-months" style="grid-template-columns:repeat(${TOTAL},1fr)">`;
   for(let i=1;i<=TOTAL;i++) header+=`<span style="text-align:center;font-size:${TOTAL>16?'9':'10'}px;color:var(--muted)">${unitLabel}${i}</span>`;
   header+='</div></div>';
 
-  const rows = p.schedule.map(t=>{
-    const barColor = statusColors[t.status]||t.color||'#6B7280';
-    const isDone = t.status==='completado';
-    const isLate = t.status==='retrasado';
-    const barText = t.dur>1?t.dur+(isWeeks?'s':'m'):'';
-    return `<div class="gantt-row" style="margin-bottom:7px">
-      <div class="g-label" style="font-size:12px;cursor:pointer;color:${isLate?'var(--red)':isDone?'var(--muted)':'var(--ink)'}" onclick="editGanttTask('${t.id}')" title="Editar: ${t.label}">
-        ${isDone?'✓ ':''}${isLate?'⚠ ':''}${t.label}
-      </div>
-      <div class="g-track" style="cursor:pointer" onclick="editGanttTask('${t.id}')">
-        <div class="g-bar" style="left:${t.start/TOTAL*100}%;width:${Math.max(t.dur,1)/TOTAL*100}%;background:${barColor};opacity:${isDone?.55:1};position:relative" title="${t.label}">
-          ${barText}
-          ${t.notes?'<span style="position:absolute;right:4px;top:50%;transform:translateY(-50%);font-size:10px">📝</span>':''}
-        </div>
-        <div class="g-today" style="left:${unitProgress/TOTAL*100}%"></div>
-      </div>
+  // Build Gantt rows grouped by zone
+  const ZONES=['pre','obra','post'];
+  let rows='';
+  ZONES.forEach(zone=>{
+    const zPhases=p.schedule.filter(t=>(t.zone||'obra')===zone);
+    if(!zPhases.length)return;
+    const zm=zoneMeta[zone];
+    rows+=`<div style="display:grid;grid-template-columns:180px 1fr;gap:6px;margin-bottom:2px">
+      <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:${zm.color};padding:3px 6px;background:${zm.bg};border-radius:4px;border:1px solid ${zm.border};align-self:center">${zm.label}</div>
+      <div style="background:${zm.bg};border-radius:4px;border:1px solid ${zm.border};height:22px"></div>
     </div>`;
-  }).join('');
+    zPhases.forEach(t=>{
+      const barColor=statusColors[t.status]||t.color||'#6B7280';
+      const isDone=t.status==='completado';
+      const isLate=t.status==='retrasado';
+      const barText=t.dur>1?t.dur+(isWeeks?'s':'m'):'';
+      rows+=`<div class="gantt-row" style="margin-bottom:5px">
+        <div class="g-label" style="font-size:11px;cursor:pointer;color:${isLate?'var(--red)':isDone?'var(--muted)':'var(--ink)'};padding-left:10px" onclick="editGanttTask('${t.id}')" title="Editar: ${t.label}">
+          ${isDone?'✓ ':''}${isLate?'⚠ ':''}${t.label.replace(/^FASE \d+ · /,'')}
+        </div>
+        <div class="g-track" style="cursor:pointer" onclick="editGanttTask('${t.id}')">
+          <div class="g-bar" style="left:${t.start/TOTAL*100}%;width:${Math.max(t.dur,1)/TOTAL*100}%;background:${barColor};opacity:${isDone?.55:1};position:relative" title="${t.label}">${barText}${t.notes?'<span style="position:absolute;right:4px;top:50%;transform:translateY(-50%);font-size:10px">📝</span>':''}</div>
+          <div class="g-today" style="left:${unitProgress/TOTAL*100}%"></div>
+        </div>
+      </div>`;
+    });
+  });
 
-  const counts = {};
+
+  const counts={};
   p.schedule.forEach(t=>{counts[t.status]=(counts[t.status]||0)+1;});
-
-  // Scale switch badge
-  const scaleChip=`<button class="btn btn-xs btn-ghost" style="font-size:11px" onclick="toggleScheduleScale()" title="Cambiar escala">
-    ${isWeeks?'📅 Semanas':'📆 Meses'} ↔
-  </button>`;
+  const scaleChip=`<button class="btn btn-xs btn-ghost" style="font-size:11px" onclick="toggleScheduleScale()">${isWeeks?'📅 Semanas':'📆 Meses'} ↔</button>`;
 
   document.getElementById('page-schedule').innerHTML = `
   <div class="card" style="margin-bottom:14px">
-    <div class="card-title">Avance de obra
+    <div class="card-title">Cronograma
       <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
         ${scaleChip}
-        <span style="font-size:12px;color:var(--muted)">${unitLabel}${unitProgress} de ${unitLabel}${TOTAL}</span>
-        <input type="range" min="0" max="100" value="${p.progress||0}" style="width:130px" oninput="updateProgress(this.value)">
-        <span style="font-size:13px;font-weight:600" id="progress-display">${p.progress||0}%</span>
+        <button class="btn btn-sm" style="background:#EFF6FF;color:#1D4ED8;border:1px solid #BFDBFE;font-size:12px" onclick="showScheduleClientReport()">📋 Reporte cliente</button>
         <button class="btn btn-primary btn-sm" onclick="addGanttTask()">+ Fase</button>
       </div>
     </div>
-    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;align-items:center">
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;align-items:center">
+      <div style="flex:1;background:#F3F4F6;border-radius:6px;height:8px;overflow:hidden;min-width:120px">
+        <div style="height:100%;width:${autoPct}%;background:linear-gradient(90deg,#2563EB,#16A34A);border-radius:6px;transition:width .4s"></div>
+      </div>
+      <span style="font-size:13px;font-weight:700;color:var(--ink)">${autoPct}%</span>
+      <span style="font-size:11px;color:var(--muted)">${donePhases}/${totalPhases} fases</span>
       ${Object.entries(counts).map(([s,n])=>`<span class="badge b-gray" style="background:${{pendiente:'#F3F4F6',en_curso:'#EFF6FF',completado:'#DCFCE7',retrasado:'#FEE2E2',pausado:'#FEF3C7'}[s]||'#F3F4F6'};color:${{pendiente:'#6B7280',en_curso:'#1D4ED8',completado:'#15803D',retrasado:'#991B1B',pausado:'#92400E'}[s]||'#6B7280'}">${s}: ${n}</span>`).join('')}
-      <span style="font-size:11px;color:var(--muted)">· Clic en barra o nombre para editar</span>
+      <span style="font-size:11px;color:var(--muted)">· Clic para editar</span>
     </div>
     <div class="gantt-wrap" style="overflow-x:auto">${header}${rows}</div>
   </div>
@@ -1614,20 +1648,27 @@ function renderSchedule() {
   </div>`:`
   <div class="card">
     <table>
-      <tr><th>Fase</th><th>Categoría</th><th>Inicio</th><th>Duración</th><th>Fin</th><th>Estado</th><th>Responsable</th><th></th></tr>
-      ${p.schedule.map(t=>`<tr>
-        <td style="font-weight:500">${t.label}</td>
-        <td><span class="badge b-gray">${t.category||'—'}</span></td>
-        <td style="font-family:monospace;font-size:12px">${unitLabel}${t.start+1}</td>
-        <td style="font-family:monospace;font-size:12px">${t.dur} ${t.dur===1?unitName:unitPl}</td>
-        <td style="font-family:monospace;font-size:12px">${unitLabel}${t.start+t.dur}</td>
-        <td><span class="badge ${{pendiente:'b-gray',en_curso:'b-blue',completado:'b-green',retrasado:'b-red',pausado:'b-amber'}[t.status]||'b-gray'}">${t.status}</span></td>
-        <td style="font-size:12px;color:var(--muted)">${t.responsible||'—'}</td>
-        <td style="display:flex;gap:4px">
-          <button class="btn btn-xs btn-ghost" onclick="editGanttTask('${t.id}')">✏</button>
-          <button class="btn btn-xs btn-ghost" onclick="deleteGanttTask('${t.id}')">✕</button>
-        </td>
-      </tr>`).join('')}
+      <tr><th style="width:24px"></th><th>Fase</th><th>Zona</th><th>Inicio</th><th>Dur.</th><th>Estado</th><th>Responsable</th><th></th></tr>
+      ${['pre','obra','post'].flatMap(zone=>{
+        const zPh=p.schedule.filter(t=>(t.zone||'obra')===zone);
+        if(!zPh.length)return[];
+        const zm={pre:{label:'PRE-OBRA',color:'#6B7280'},obra:{label:'OBRA',color:'#1D4ED8'},post:{label:'POST-OBRA',color:'#15803D'}}[zone];
+        return [`<tr><td colspan="8" style="padding:6px 8px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:${zm.color};background:${{pre:'#F9FAFB',obra:'#EFF6FF',post:'#F0FDF4'}[zone]}">${zm.label}</td></tr>`,
+          ...zPh.map(t=>`<tr>
+          <td><input type="checkbox" ${t.status==='completado'?'checked':''} onchange="setGanttStatus('${t.id}',this.checked?'completado':'pendiente')" title="Marcar completado"></td>
+          <td style="font-weight:500;font-size:13px">${t.label}</td>
+          <td><span class="badge b-gray" style="font-size:10px">${t.category||'—'}</span></td>
+          <td style="font-family:monospace;font-size:12px">${unitLabel}${t.start+1}</td>
+          <td style="font-family:monospace;font-size:12px">${t.dur} ${t.dur===1?unitName:unitPl}</td>
+          <td><span class="badge ${{pendiente:'b-gray',en_curso:'b-blue',completado:'b-green',retrasado:'b-red',pausado:'b-amber'}[t.status]||'b-gray'}">${t.status}</span></td>
+          <td style="font-size:12px;color:var(--muted)">${t.responsible||'—'}</td>
+          <td style="display:flex;gap:4px">
+            <button class="btn btn-xs btn-ghost" onclick="editGanttTask('${t.id}')">✏</button>
+            <button class="btn btn-xs btn-ghost" onclick="deleteGanttTask('${t.id}')">✕</button>
+          </td>
+        </tr>`)];
+      }).join('')}
+
       ${p.schedule.length===0?'<tr><td colspan="8" style="color:var(--muted);text-align:center;padding:16px">Sin fases. Añade la primera con + Fase.</td></tr>':''}
     </table>
   </div>`}
@@ -1826,6 +1867,88 @@ function deleteGanttTask(id){
   if(!confirm('¿Eliminar esta fase?'))return;
   const p=getProject();p.schedule=p.schedule.filter(x=>x.id!==id);
   saveProject();renderSchedule();showToast('Fase eliminada');
+}
+function setGanttStatus(id,status){const p=getProject();const t=p.schedule.find(x=>x.id===id);if(t){t.status=status;}saveProject();renderSchedule();if(currentPage==='dashboard')renderDashboard();}
+// ─── CAMBIO 4: Reporte de cronograma para cliente ────────────────────────────
+function showScheduleClientReport(){
+  const p=getProject();
+  if(!p.schedule.length){showToast('El cronograma está vacío','warning');return;}
+  const isWeeks=getScheduleScale(p)==='weeks';
+  const TOTAL=getScheduleTotal(p,isWeeks?'weeks':'months');
+  const unitLabel=isWeeks?'S':'M';
+  const totalPh=p.schedule.length;
+  const donePh=p.schedule.filter(t=>t.status==='completado').length;
+  const inProcPh=p.schedule.filter(t=>t.status==='en_curso').length;
+  const pct=totalPh>0?Math.round(donePh/totalPh*100):0;
+  const ZBGC={pre:{bg:'#F3F4F6',color:'#6B7280',label:'Pre-obra'},obra:{bg:'#EFF6FF',color:'#1D4ED8',label:'Obra'},post:{bg:'#F0FDF4',color:'#15803D',label:'Post-obra'}};
+  const SBGC={pendiente:{bg:'#F3F4F6',c:'#6B7280'},en_curso:{bg:'#EFF6FF',c:'#1D4ED8'},completado:{bg:'#DCFCE7',c:'#15803D'},retrasado:{bg:'#FEE2E2',c:'#991B1B'},pausado:{bg:'#FEF3C7',c:'#92400E'}};
+  // Próximas 2 unidades activas
+  const maxStart=Math.max(...p.schedule.map(t=>t.start));
+  const cur=p.schedule.filter(t=>t.status==='en_curso'||t.status==='pendiente');
+  const next2=cur.sort((a,b)=>a.start-b.start).slice(0,4);
+  const overlay=document.createElement('div');
+  overlay.id='sched-report-overlay';
+  overlay.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9997;display:flex;align-items:center;justify-content:center;padding:16px';
+  overlay.innerHTML=`<div style="background:#fff;border-radius:12px;width:100%;max-width:640px;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.3);max-height:92vh;display:flex;flex-direction:column">
+    <div style="padding:16px 24px;background:linear-gradient(135deg,#1D4ED8,#2563EB);color:#fff">
+      <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.1em;opacity:.8;margin-bottom:4px">Reporte de Cronograma</div>
+      <div style="font-size:18px;font-weight:800">${p.name}</div>
+      <div style="font-size:12px;opacity:.8;margin-top:2px">${p.meta?.city||''} · Emitido ${new Date().toLocaleDateString('es',{day:'2-digit',month:'long',year:'numeric'})}</div>
+    </div>
+    <div style="flex:1;overflow-y:auto;padding:20px 24px">
+      <!-- Progress summary -->
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:20px">
+        <div style="text-align:center;padding:14px;background:#EFF6FF;border-radius:10px">
+          <div style="font-size:28px;font-weight:800;color:#1D4ED8">${pct}%</div>
+          <div style="font-size:11px;color:#1D4ED8;font-weight:600">Avance</div>
+        </div>
+        <div style="text-align:center;padding:14px;background:#DCFCE7;border-radius:10px">
+          <div style="font-size:28px;font-weight:800;color:#15803D">${donePh}</div>
+          <div style="font-size:11px;color:#15803D;font-weight:600">Completadas</div>
+        </div>
+        <div style="text-align:center;padding:14px;background:#FEF3C7;border-radius:10px">
+          <div style="font-size:28px;font-weight:800;color:#92400E">${totalPh-donePh}</div>
+          <div style="font-size:11px;color:#92400E;font-weight:600">Pendientes</div>
+        </div>
+      </div>
+      <!-- Progress bar -->
+      <div style="background:#F3F4F6;border-radius:8px;height:12px;margin-bottom:20px;overflow:hidden">
+        <div style="height:100%;width:${pct}%;background:linear-gradient(90deg,#2563EB,#16A34A);border-radius:8px;transition:width .5s"></div>
+      </div>
+      <!-- Phases by zone -->
+      ${['pre','obra','post'].map(zone=>{
+        const zPh=p.schedule.filter(t=>(t.zone||'obra')===zone);
+        if(!zPh.length)return'';
+        const zm=ZBGC[zone];
+        return`<div style="margin-bottom:16px">
+          <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:${zm.color};margin-bottom:8px;padding:4px 8px;background:${zm.bg};border-radius:4px;display:inline-block">${zm.label}</div>
+          ${zPh.map(t=>{
+            const sc=SBGC[t.status]||SBGC.pendiente;
+            return`<div style="display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:8px;margin-bottom:4px;border:1px solid #F3F4F6">
+              <div style="width:10px;height:10px;border-radius:50%;background:${sc.bg};border:2px solid ${sc.c};flex-shrink:0"></div>
+              <div style="flex:1;font-size:13px;font-weight:500">${t.label}</div>
+              <div style="font-size:11px;color:#6B7280">${unitLabel}${t.start+1}–${unitLabel}${t.start+t.dur}</div>
+              <span style="font-size:10px;padding:2px 7px;border-radius:20px;background:${sc.bg};color:${sc.c};font-weight:600">${t.status}</span>
+            </div>`;
+          }).join('')}
+        </div>`;
+      }).join('')}
+      <!-- Próximas actividades -->
+      ${next2.length?`<div style="border-top:1px solid #F3F4F6;padding-top:16px;margin-top:4px">
+        <div style="font-size:12px;font-weight:700;color:var(--ink);margin-bottom:8px">⏭ Próximas actividades</div>
+        ${next2.map(t=>`<div style="display:flex;align-items:center;gap:8px;padding:6px 10px;background:#FFFBEB;border-radius:6px;margin-bottom:4px;font-size:12px">
+          <span style="color:#D97706">▶</span>
+          <span style="font-weight:500;flex:1">${t.label}</span>
+          <span style="color:#6B7280">${unitLabel}${t.start+1}</span>
+        </div>`).join('')}
+      </div>`:''}
+    </div>
+    <div style="padding:12px 24px;border-top:1px solid #E5E7EB;display:flex;gap:8px;justify-content:flex-end">
+      <button onclick="document.getElementById('sched-report-overlay').remove()" style="padding:8px 18px;border:1px solid #E5E7EB;border-radius:8px;background:#fff;cursor:pointer;font-size:13px">Cerrar</button>
+      <button onclick="window.print()" style="padding:8px 18px;background:#1D4ED8;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:13px;font-weight:600">🖨 Imprimir / PDF</button>
+    </div>
+  </div>`;
+  document.body.appendChild(overlay);
 }
 
 // ─── Toggle escala por proyecto ──────────────────────
@@ -5023,28 +5146,27 @@ function iaBatchApplyOne(d,item){
 
   // ─── 8. FASES DE CRONOGRAMA DETECTADAS ───────────────
   const crono=d.cronograma||{};
+  const _normLabel=s=>s.toLowerCase().replace(/fase\s*\d+\s*[·\-]?\s*/i,'').trim();
+  let schedAdded=0,schedUpdated=0;
   (crono.fases_detectadas||[]).forEach(fase=>{
     if(!fase.nombre)return;
-    // Solo añadir si no existe ya
-    const exists=p.schedule.find(s=>s.label.toLowerCase()===fase.nombre.toLowerCase());
-    if(!exists){
-      p.schedule.push({
-        id:uid(),label:fase.nombre,
-        category:fase.categoria||'otros',
-        status:'pendiente',
-        start:parseInt(fase.mes_inicio)||0,
-        dur:parseInt(fase.duracion)||1,
-        delay:0,notes:fase.notas||'',
-        responsible:'',color:'#6B7280'
-      });
+    const existing=p.schedule.find(s=>s.label.toLowerCase()===fase.nombre.toLowerCase())||p.schedule.find(s=>_normLabel(s.label)===_normLabel(fase.nombre)&&_normLabel(fase.nombre).length>3);
+    if(existing){
+      const ns=parseInt(fase.mes_inicio)||0,nd=parseInt(fase.duracion)||1;
+      if(existing.start!==ns||existing.dur!==nd){existing.start=ns;existing.dur=nd;existing.week_start=ns;existing.week_dur=nd;schedUpdated++;}
+    } else {
+      p.schedule.push({id:uid(),label:fase.nombre,category:fase.categoria||'otros',zone:'obra',status:'pendiente',start:parseInt(fase.mes_inicio)||0,dur:parseInt(fase.duracion)||1,delay:0,notes:fase.notas||'',responsible:'',color:'#6B7280',week_start:parseInt(fase.mes_inicio)||0,week_dur:parseInt(fase.duracion)||1});
+      schedAdded++;
     }
   });
   (crono.hitos_detectados||[]).forEach(hito=>{
     if(!hito.descripcion)return;
     if(!p.milestones)p.milestones=[];
-    p.milestones.push({id:uid(),label:hito.descripcion,unit:parseInt(hito.mes)||1,status:'pendiente'});
+    if(!p.milestones.find(m=>m.label.toLowerCase()===hito.descripcion.toLowerCase()))
+      p.milestones.push({id:uid(),label:hito.descripcion,unit:parseInt(hito.mes)||1,status:'pendiente'});
   });
-  if((crono.fases_detectadas||[]).length)applied.push('📅 '+crono.fases_detectadas.length+' fase(s) al cronograma');
+  const _schedMsg=[schedAdded?schedAdded+' nueva(s)':'',schedUpdated?schedUpdated+' actualizada(s)':''].filter(Boolean).join(', ');
+  if(_schedMsg)applied.push('📅 Cronograma: '+_schedMsg);
 
   // ─── 9. ALERTAS ──────────────────────────────────────
   (d.alertas||[]).forEach(a=>{
@@ -6166,9 +6288,23 @@ function autoDetectScale(){
   if(months>0){
     const auto=months<4?'weeks':'months';
     scaleEl.value=auto;
-    hintEl.textContent=`Auto-detectado: ${Math.round(months)} mes(es) → ${auto==='weeks'?'📅 semanas':'📆 meses'}`;
-    hintEl.style.color=auto==='weeks'?'var(--blue)':'var(--muted)';
+    if(hintEl){hintEl.textContent=`Auto-detectado: ${Math.round(months)} mes(es) → ${auto==='weeks'?'📅 semanas':'📆 meses'}`;hintEl.style.color=auto==='weeks'?'var(--blue)':'var(--muted)';}
   }
+}
+
+function calcNpEndDate(){
+  const start=document.getElementById('np-start')?.value;
+  if(!start)return;
+  const obra=parseInt(document.getElementById('np-obra-weeks')?.value)||12;
+  const pre=parseInt(document.getElementById('np-pre-weeks')?.value)||1;
+  const post=parseInt(document.getElementById('np-post-weeks')?.value)||1;
+  const totalWeeks=pre+obra+post;
+  const d=new Date(start+'T12:00:00');
+  d.setDate(d.getDate()+totalWeeks*7);
+  document.getElementById('np-end').value=d.toISOString().split('T')[0];
+  if(document.getElementById('np-duration'))document.getElementById('np-duration').value=totalWeeks;
+  if(document.getElementById('np-duration-unit'))document.getElementById('np-duration-unit').value='semanas';
+  autoDetectScale();
 }
 
 function createProject(){
@@ -6181,6 +6317,10 @@ function createProject(){
   const scale=document.getElementById('np-scale')?.value||'months';
   const durVal=parseInt(document.getElementById('np-duration')?.value)||0;
   const durUnit=document.getElementById('np-duration-unit')?.value||'meses';
+
+  const obraWeeks=parseInt(document.getElementById('np-obra-weeks')?.value)||12;
+  const preWeeks=parseInt(document.getElementById('np-pre-weeks')?.value)||1;
+  const postWeeks=parseInt(document.getElementById('np-post-weeks')?.value)||1;
 
   const newP={
     id,slug,name,
@@ -6195,9 +6335,12 @@ function createProject(){
       start_date:startDate,end_date_estimated:endDate,
       area_m2:parseInt(document.getElementById('np-area').value)||0,
       budget_total:parseInt(document.getElementById('np-budget').value)||0,
-      schedule_scale:scale,
-      duration_value:durVal,
-      duration_unit:durUnit
+      schedule_scale:'weeks',
+      duration_value:preWeeks+obraWeeks+postWeeks,
+      duration_unit:'semanas',
+      obra_weeks:obraWeeks,
+      pre_weeks:preWeeks,
+      post_weeks:postWeeks
     },
     status:document.getElementById('np-status').value,
     tasks:[],weekly_todo:{week:'',items:[],notes:'',generated_by_ia:false},
@@ -6213,9 +6356,53 @@ function createProject(){
   if(document.getElementById('np-notes').value){
     newP.notes_internal.push({id:uid(),title:'Brief inicial',content:document.getElementById('np-notes').value,tag:'general',date:TODAY});
   }
+  generateDefaultSchedule(newP,obraWeeks,preWeeks,postWeeks);
   APP.projects[id]=newP;APP.workspace.activeProjectId=id;saveState();
   closeModal('modal-new-project');populateSelector();switchProject(id);wizardNext(1);
-  showToast(`Proyecto "${name}" creado · Cronograma en ${scale==='weeks'?'semanas':'meses'}`);
+  showToast(`Proyecto "${name}" creado · ${newP.schedule.length} fases generadas automáticamente`,'success',4000);
+}
+
+// ─── Auto-generate schedule on project creation ──────────────────────────────
+function generateDefaultSchedule(p,obraWeeks,preWeeks,postWeeks){
+  obraWeeks=obraWeeks||12;preWeeks=preWeeks||1;postWeeks=postWeeks||1;
+  const type=(p.meta?.type||'').toLowerCase();
+  const isNueva=type.includes('moradia')||type.includes('unifamiliar')||type.includes('obra nueva');
+  const f=Math.max(0.5,obraWeeks/12);
+  const f2=Math.max(0.5,obraWeeks/24);
+  const r=n=>Math.max(1,Math.round(n));
+  let ph=[];
+  if(isNueva){
+    ph=[
+      {l:'Geotécnico y topografía',cat:'admin',z:'pre',s:0,d:r(2*f2),c:'#6B7280',n:'Estudio geotécnico, topografía, replanteo'},
+      {l:'Proyecto ejecutivo y visado',cat:'admin',z:'pre',s:r(2*f2),d:r(Math.max(1,preWeeks-r(2*f2))),c:'#9CA3AF',n:'Proyecto de ejecución, visado colegial'},
+      {l:'FASE 1 · Movimiento de tierras',cat:'estructura',z:'obra',s:preWeeks,d:r(2*f2),c:'#92400E'},
+      {l:'FASE 2 · Cimentación',cat:'estructura',z:'obra',s:preWeeks+r(2*f2),d:r(3*f2),c:'#92400E',n:'Zapatas, losa, muros de contención'},
+      {l:'FASE 3 · Estructura y forjados',cat:'estructura',z:'obra',s:preWeeks+r(5*f2),d:r(5*f2),c:'#2563EB'},
+      {l:'FASE 4 · Cubierta',cat:'albañilería',z:'obra',s:preWeeks+r(10*f2),d:r(3*f2),c:'#0D9488'},
+      {l:'FASE 5 · Fachada y cerramientos',cat:'albañilería',z:'obra',s:preWeeks+r(11*f2),d:r(4*f2),c:'#16A34A'},
+      {l:'FASE 6 · Instalaciones',cat:'instalaciones',z:'obra',s:preWeeks+r(14*f2),d:r(4*f2),c:'#D97706',n:'Fontanería, electricidad, climatización, telecomunicaciones'},
+      {l:'FASE 7 · Acabados interiores',cat:'acabados',z:'obra',s:preWeeks+r(17*f2),d:r(4*f2),c:'#DC2626'},
+      {l:'FASE 8 · Exteriores y jardín',cat:'exteriores',z:'obra',s:preWeeks+r(20*f2),d:r(3*f2),c:'#7C3AED'},
+      {l:'Inspecciones y cédula de habitabilidad',cat:'admin',z:'post',s:preWeeks+obraWeeks,d:r(postWeeks*.7||1),c:'#16A34A'},
+      {l:'As-built y documentación final',cat:'admin',z:'post',s:preWeeks+obraWeeks+r(postWeeks*.7||1),d:r(postWeeks*.3||1),c:'#4ADE80',n:'Planos as-built, fotos, entrega llaves'},
+    ];
+  } else {
+    // Reforma / Rehabilitación / Interiorismo / Fit-Out / default
+    ph=[
+      {l:'Licencias y trámites',cat:'admin',z:'pre',s:0,d:r(preWeeks*.6||1),c:'#6B7280',n:'Solicitud licencia, comunicación vecinos'},
+      {l:'Contratación y pedidos',cat:'admin',z:'pre',s:r(preWeeks*.4),d:r(preWeeks*.6||1),c:'#9CA3AF',n:'Selección empresa, pedido materiales plazo largo'},
+      {l:'FASE 1 · Derribos y desmontajes',cat:'albañilería',z:'obra',s:preWeeks,d:r(1*f),c:'#92400E',n:'Demoliciones, desmontajes, gestión escombros'},
+      {l:'FASE 2 · Mampostería y saneamiento',cat:'albañilería',z:'obra',s:preWeeks+r(1*f),d:r(2*f),c:'#16A34A',n:'Nuevas paredes, nivelación suelos, saneamiento horizontal'},
+      {l:'FASE 3 · Instalaciones',cat:'instalaciones',z:'obra',s:preWeeks+r(3*f),d:r(3*f),c:'#D97706',n:'Fontanería, electricidad, climatización, datos, caldera'},
+      {l:'FASE 4 · Cerramientos',cat:'albañilería',z:'obra',s:preWeeks+r(5*f),d:r(2*f),c:'#2563EB',n:'Pladur, insonorización, falsos techos'},
+      {l:'FASE 5 · Acabados',cat:'acabados',z:'obra',s:preWeeks+r(7*f),d:r(3*f),c:'#DC2626',n:'Revestimientos, suelos, pintura, puertas interiores'},
+      {l:'FASE 6 · Mobiliario y herrería',cat:'carpintería',z:'obra',s:preWeeks+r(9*f),d:r(2*f),c:'#0D9488',n:'Herrería, mobiliario fijo, armarios'},
+      {l:'FASE 7 · Instalaciones finales',cat:'instalaciones',z:'obra',s:preWeeks+r(10*f),d:r(2*f),c:'#7C3AED',n:'Iluminación, mecanismos, señalética, equipamiento'},
+      {l:'Limpieza y entrega provisional',cat:'admin',z:'post',s:preWeeks+obraWeeks,d:r(postWeeks*.6||1),c:'#16A34A',n:'Limpieza profunda, inspecciones, subsanaciones'},
+      {l:'As-built, fotos y entrega final',cat:'admin',z:'post',s:preWeeks+obraWeeks+r(postWeeks*.6||1),d:r(postWeeks*.4||1),c:'#4ADE80',n:'Planos as-built, fotos finales, entrega llaves'},
+    ];
+  }
+  p.schedule=ph.map(t=>({id:uid(),label:t.l,category:t.cat,zone:t.z||'obra',status:'pendiente',start:t.s,dur:t.d,delay:0,notes:t.n||'',responsible:'',color:t.c||'#6B7280',week_start:t.s,week_dur:t.d}));
 }
 
 // ══════════════════════════════════════════════════════
