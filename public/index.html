@@ -1471,30 +1471,63 @@ function renderTasks() {
 }
 
 function renderTaskRow(t,cur){
-  const done = t.status==='completada';
-  const pc = {alta:'b-red',media:'b-amber',baja:'b-gray'}[t.priority]||'b-gray';
-  const days = t.due_date?daysUntil(t.due_date):null;
-  const overdue = days!==null&&days<0&&!done;
-  return `<div class="task-row" style="${done?'opacity:.55':''}${overdue?';border-color:var(--red)':''}">
-    <div class="task-check ${done?'done':''}" onclick="toggleTask('${t.id}')">
-      ${done?'✓':''}
+  const done=t.status==='completada';
+  const inProg=t.status==='en_proceso';
+  const days=t.due_date?daysUntil(t.due_date):null;
+  const overdue=days!==null&&days<0&&!done;
+  const SCOL={pendiente:'#9CA3AF',en_proceso:'#2563EB',completada:'#16A34A'};
+  const SICON={pendiente:'○',en_proceso:'◐',completada:'✓'};
+  const PCOL={alta:'border-color:#FCA5A5;color:#DC2626',media:'border-color:#FCD34D;color:#D97706',baja:'border-color:#E5E7EB;color:#9CA3AF'};
+  const SS='font-size:11px;padding:2px 7px;border-radius:20px;border:1px solid;cursor:pointer;outline:none;background:#fff;font-weight:500;width:auto;flex-shrink:0';
+  const CATS=['pago','contratación','seguimiento','compra','diseño','permisos','reunión','ia','otro'];
+  return `<div class="task-row" style="${done?'opacity:.6':''}${overdue?';border-left:3px solid var(--red)':''}">
+    <div style="cursor:pointer;font-size:17px;color:${SCOL[t.status]||'#9CA3AF'};flex-shrink:0;user-select:none;line-height:1" onclick="cycleTaskStatus('${t.id}')" title="Cambiar estado: ${t.status}">${SICON[t.status]||'○'}</div>
+    <div style="flex:1;min-width:0">
+      <div style="${done?'text-decoration:line-through;color:var(--muted);':''}font-size:13px;font-weight:500;margin-bottom:3px">
+        <span contenteditable="true" onfocus="this.style.borderBottomColor='var(--blue)'" onblur="setTaskField('${t.id}','title',this.textContent.trim());this.style.borderBottomColor='transparent'" style="outline:none;border-bottom:1px dashed transparent">${t.title}</span>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <input type="text" value="${t.responsible||''}" placeholder="Responsable" onchange="setTaskField('${t.id}','responsible',this.value)" style="font-size:11px;border:none;background:transparent;color:var(--muted);width:110px;padding:0">
+        <input type="date" value="${t.due_date||''}" onchange="setTaskField('${t.id}','due_date',this.value)" style="font-size:11px;border:none;background:transparent;color:${overdue?'var(--red)':'var(--muted)'};padding:0;cursor:pointer;width:auto">
+        ${overdue?'<span style="color:var(--red);font-size:10px;font-weight:700">VENCIDA</span>':''}
+      </div>
     </div>
-    <div class="task-text">
-      <div class="task-name" style="${done?'text-decoration:line-through;color:var(--muted)':''}">${t.title}</div>
-      <div class="task-meta">${t.responsible||''} ${t.due_date?'· '+fmtDate(t.due_date):''} ${overdue?'<span style="color:var(--red);font-weight:500">· Vencida</span>':''} ${t.category?'· '+t.category:''}</div>
-    </div>
-    <span class="badge ${pc}">${t.priority}</span>
-    <button class="btn btn-xs btn-ghost" onclick="deleteTask('${t.id}')">✕</button>
+    <select onchange="setTaskField('${t.id}','priority',this.value)" style="${SS};${PCOL[t.priority]||PCOL.baja}">
+      <option value="alta"${t.priority==='alta'?' selected':''}>🔴 Alta</option>
+      <option value="media"${t.priority==='media'?' selected':''}>🟡 Media</option>
+      <option value="baja"${t.priority==='baja'?' selected':''}>🟢 Baja</option>
+    </select>
+    <select onchange="setTaskField('${t.id}','category',this.value)" style="font-size:11px;padding:2px 6px;border:1px solid var(--border);border-radius:4px;cursor:pointer;width:auto;outline:none;background:#fff;color:var(--muted);flex-shrink:0">
+      <option value="">Cat…</option>
+      ${CATS.map(c=>`<option value="${c}"${t.category===c?' selected':''}>${c}</option>`).join('')}
+    </select>
+    <button onclick="duplicateTask('${t.id}')" class="btn btn-xs btn-ghost" title="Duplicar tarea">⧉</button>
+    <button onclick="deleteTask('${t.id}')" class="btn btn-xs btn-ghost" title="Eliminar">✕</button>
   </div>`;
 }
 
-function toggleTask(id) {
-  const p = getProject();
-  const t = p.tasks.find(x=>x.id===id);
-  if(t) t.status = t.status==='completada'?'pendiente':'completada';
-  saveProject();updateBadges();renderTasks();if(currentPage==='dashboard')renderDashboard();
+function setTaskField(id,field,value){
+  if(field==='title'&&!value)return;
+  const p=getProject();const t=p.tasks.find(x=>x.id===id);if(!t)return;
+  t[field]=value;
+  saveProject();updateBadges();
+  if(field==='priority'||field==='category'||field==='status')renderTasks();
+  if(currentPage==='dashboard')renderDashboard();
 }
-function deleteTask(id){const p=getProject();p.tasks=p.tasks.filter(x=>x.id!==id);saveProject();updateBadges();renderTasks();}
+function cycleTaskStatus(id){
+  const p=getProject();const t=p.tasks.find(x=>x.id===id);if(!t)return;
+  const next={pendiente:'en_proceso',en_proceso:'completada',completada:'pendiente'};
+  t.status=next[t.status]||'pendiente';
+  saveProject();updateBadges();renderTasks();if(currentPage==='dashboard')renderDashboard();
+  showToast(t.title.slice(0,30)+' → '+t.status,'success',2000);
+}
+function duplicateTask(id){
+  const p=getProject();const t=p.tasks.find(x=>x.id===id);if(!t)return;
+  p.tasks.push({...t,id:uid(),title:t.title+' (copia)',status:'pendiente'});
+  saveProject();renderTasks();showToast('Tarea duplicada','success',2000);
+}
+function toggleTask(id){cycleTaskStatus(id);}
+function deleteTask(id){if(confirm('¿Eliminar esta tarea?')){const p=getProject();p.tasks=p.tasks.filter(x=>x.id!==id);saveProject();updateBadges();renderTasks();}}
 function saveTask(){
   const p=getProject();
   const title=document.getElementById('t-title').value.trim();
@@ -2068,24 +2101,52 @@ function renderDocuments() {
 }
 
 function renderDocItem(d){
-  const icons = {pdf:'📄',dwg:'📐',doc:'📋',img:'📷'};
-  const icon = icons[d.file_type]||'📄';
-  const iclass = {pdf:'pdf',dwg:'dwg',doc:'doc',img:'img'}[d.file_type]||'pdf';
-  const sc = {aprobado:'b-green',entregado:'b-green',emitido:'b-green',válido:'b-green',firmado:'b-green',pendiente:'b-amber',borrador:'b-gray'}[d.status]||'b-gray';
-  const expires = d.expires_at?` · vence ${fmtDate(d.expires_at)}`:'';
-  const hasFile = !!d.file_data;
-  return `<div class="doc-item" onclick="openViewer('${d.id}')">
-    <div class="doc-icon ${iclass}">${icon}</div>
-    <div class="doc-meta">
-      <div class="doc-name">${d.name}${!hasFile?' <span style="color:var(--muted);font-size:11px">[sin archivo]</span>':''}</div>
-      <div class="doc-info">${d.file_type.toUpperCase()} ${d.file_size_kb?'· '+(d.file_size_kb/1024).toFixed(1)+' MB':''} · v${d.version} · ${fmtDate(d.uploaded_at)}${expires} ${d.ia_summary?'· 🤖 IA':''}</div>
+  const icons={pdf:'📄',dwg:'📐',doc:'📋',img:'📷'};
+  const icon=icons[d.file_type]||'📄';
+  const iclass={pdf:'pdf',dwg:'dwg',doc:'doc',img:'img'}[d.file_type]||'pdf';
+  const STATUS_COL={aprobado:'b-green',entregado:'b-green',emitido:'b-green',válido:'b-green',firmado:'b-green',pendiente:'b-amber',borrador:'b-gray',vencido:'b-red',archivado:'b-gray'};
+  const sc=STATUS_COL[d.status]||'b-gray';
+  const expires=d.expires_at?` · vence ${fmtDate(d.expires_at)}`:'';
+  const hasFile=!!d.file_data;
+  const DOC_CATS=['arquitectura','especialidades','licencias','contratos','seguros','pagos','presupuestos','comunicaciones','informes','otros'];
+  const DOC_STATUS=['válido','aprobado','pendiente','borrador','vencido','archivado'];
+  return `<div class="doc-item" style="flex-wrap:wrap;gap:8px">
+    <div class="doc-icon ${iclass}" style="cursor:pointer" onclick="openViewer('${d.id}')">${icon}</div>
+    <div class="doc-meta" style="flex:1;min-width:0">
+      <div class="doc-name">
+        <span contenteditable="true" onfocus="this.style.outline='1px solid var(--blue)'" onblur="setDocField('${d.id}','name',this.textContent.trim());this.style.outline=''" style="outline:none">${d.name}</span>
+        ${!hasFile?'<span style="color:var(--muted);font-size:11px"> [sin archivo]</span>':''}
+      </div>
+      <div class="doc-info" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+        ${d.file_type.toUpperCase()} ${d.file_size_kb?'· '+(d.file_size_kb/1024).toFixed(1)+' MB':''}
+        <select onchange="setDocField('${d.id}','category',this.value)" style="font-size:11px;border:none;background:transparent;color:var(--muted);width:auto;cursor:pointer;outline:none;padding:0">
+          ${DOC_CATS.map(c=>`<option value="${c}"${d.category===c?' selected':''}>${c}</option>`).join('')}
+        </select>
+        · Vence: <input type="date" value="${d.expires_at||''}" onchange="setDocField('${d.id}','expires_at',this.value||null)" style="font-size:11px;border:none;background:transparent;color:var(--muted);padding:0;cursor:pointer;width:auto">
+        ${d.ia_summary?'· 🤖 IA':''}
+      </div>
+      ${d.notes!==undefined?`<div style="margin-top:3px"><span contenteditable="true" onfocus="this.style.outline='1px solid var(--blue)'" onblur="setDocField('${d.id}','notes',this.textContent.trim());this.style.outline=''" style="font-size:11px;color:var(--muted);outline:none;display:inline">${d.notes||'Añadir nota...'}</span></div>`:''}
     </div>
-    <span class="badge ${sc}">${d.status}</span>
-    <div class="doc-actions">
-      ${hasFile?`<button class="btn btn-xs btn-ghost" onclick="event.stopPropagation();downloadDocById('${d.id}')">↓</button>`:''}
-      <button class="btn btn-xs btn-ghost" onclick="event.stopPropagation();deleteDocById('${d.id}')">✕</button>
+    <div style="display:flex;flex-direction:column;gap:4px;align-items:flex-end;flex-shrink:0">
+      <select onchange="setDocField('${d.id}','status',this.value)" style="font-size:11px;padding:2px 6px;border:1px solid var(--border);border-radius:4px;background:#fff;cursor:pointer;width:auto;outline:none">
+        ${DOC_STATUS.map(s=>`<option value="${s}"${d.status===s?' selected':''}>${s}</option>`).join('')}
+      </select>
+      <div style="display:flex;gap:4px">
+        ${hasFile?`<button class="btn btn-xs btn-ghost" onclick="downloadDocById('${d.id}')" title="Descargar">↓</button>`:''}
+        <button class="btn btn-xs btn-ghost" onclick="openViewer('${d.id}')" title="Ver">👁</button>
+        <button class="btn btn-xs btn-ghost" onclick="deleteDocById('${d.id}')" title="Eliminar">✕</button>
+      </div>
     </div>
   </div>`;
+}
+
+function setDocField(id,field,value){
+  if(!value&&field==='name')return;
+  const p=getProject();const d=p.documents.find(x=>x.id===id);if(!d)return;
+  d[field]=value;
+  saveProject();
+  if(field==='category'||field==='status')renderDocuments();
+  showToast('Documento actualizado','success',1500);
 }
 
 // ── Upload logic ─────────────────
@@ -4402,6 +4463,7 @@ function renderAlerts(){
   const SS='font-size:11px;padding:3px 7px;border-radius:20px;border:1px solid;cursor:pointer;outline:none;background:#fff;font-weight:500;white-space:nowrap;flex-shrink:0;width:auto';
   const PC={Alta:'border-color:#FCA5A5;color:#DC2626',Media:'border-color:#FCD34D;color:#D97706',Baja:'border-color:#86EFAC;color:#16A34A'};
   const SC={pendiente:'border-color:#FCA5A5;color:#DC2626',en_proceso:'border-color:#FCD34D;color:#D97706',hecho:'border-color:#86EFAC;color:#16A34A'};
+  const ALERT_TYPES=['Pago','Vencimiento','Contratación','Compra','Permiso','Seguro','Reunión','Otro'];
   const row=a=>{
     const s=a.status||'pendiente';
     const pc=PC[a.priority]||PC.Baja;
@@ -4412,21 +4474,35 @@ function renderAlerts(){
         <option value="Media"${a.priority==='Media'?' selected':''}>🟡 Media</option>
         <option value="Baja"${a.priority==='Baja'?' selected':''}>🟢 Baja</option>
       </select>
-      <div style="flex:1;min-width:0;overflow:hidden">
-        <div style="font-size:13px;font-weight:500;margin-bottom:3px">
-          <span style="color:var(--muted);font-size:11px">${a.type} · </span><span contenteditable="true" onfocus="this.style.borderBottomColor='var(--blue)'" onblur="setAlertField('${a.id}','description',this.textContent.trim());this.style.borderBottomColor='transparent'" style="outline:none;border-bottom:1px dashed transparent;display:inline;word-break:break-word">${a.description}</span>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:13px;font-weight:500;margin-bottom:4px">
+          <select onchange="setAlertField('${a.id}','type',this.value)" style="font-size:11px;border:none;background:transparent;color:var(--muted);padding:0;width:auto;cursor:pointer;outline:none;margin-right:4px">
+            ${ALERT_TYPES.map(tp=>`<option value="${tp}"${a.type===tp?' selected':''}>${tp}</option>`).join('')}
+          </select>·&nbsp;<span contenteditable="true" onfocus="this.style.borderBottomColor='var(--blue)'" onblur="setAlertField('${a.id}','description',this.textContent.trim());this.style.borderBottomColor='transparent'" style="outline:none;border-bottom:1px dashed transparent;display:inline;word-break:break-word">${a.description}</span>
         </div>
-        <div style="display:flex;align-items:center;gap:8px;font-size:11px;color:var(--muted)">
-          <input type="date" value="${a.due_date||''}" onchange="setAlertField('${a.id}','due_date',this.value)" style="font-size:11px;border:none;background:transparent;color:var(--muted);cursor:pointer;padding:0">
-          ${a.amount?'· '+fmt(a.amount,cur):''}
+        <div style="display:flex;align-items:center;gap:8px;font-size:11px;color:var(--muted);flex-wrap:wrap">
+          <input type="date" value="${a.due_date||''}" onchange="setAlertField('${a.id}','due_date',this.value)" style="font-size:11px;border:none;background:transparent;color:var(--muted);cursor:pointer;padding:0;width:auto">
+          <input type="number" value="${a.amount||''}" placeholder="Importe" onchange="setAlertField('${a.id}','amount',parseFloat(this.value)||0)" style="font-size:11px;border:none;background:transparent;color:var(--muted);width:80px;padding:0">
+          <select onchange="setAlertField('${a.id}','chapter_id',this.value)" style="font-size:11px;border:none;background:transparent;color:var(--muted);width:auto;cursor:pointer;outline:none;padding:0">
+            <option value="">Cap…</option>
+            ${p.budget.map(b=>`<option value="${b.id}"${a.chapter_id===b.id?' selected':''}>${b.num} ${b.desc.slice(0,20)}</option>`).join('')}
+          </select>
+          <select onchange="setAlertField('${a.id}','provider_id',this.value)" style="font-size:11px;border:none;background:transparent;color:var(--muted);width:auto;cursor:pointer;outline:none;padding:0">
+            <option value="">Proveedor…</option>
+            ${p.providers.map(pv=>`<option value="${pv.id}"${a.provider_id===pv.id?' selected':''}>${pv.name.slice(0,22)}</option>`).join('')}
+          </select>
         </div>
+        ${a.notes!==undefined?`<div style="margin-top:4px"><span contenteditable="true" onfocus="this.style.borderBottomColor='var(--blue)'" onblur="setAlertField('${a.id}','notes',this.textContent.trim());this.style.borderBottomColor='transparent'" style="font-size:11px;color:var(--muted);outline:none;border-bottom:1px dashed transparent;display:inline" placeholder="Nota interna...">${a.notes||''}</span></div>`:`<div style="margin-top:4px"><span contenteditable="true" onfocus="this.style.borderBottomColor='var(--blue)'" onblur="setAlertField('${a.id}','notes',this.textContent.trim());this.style.borderBottomColor='transparent'" style="font-size:11px;color:var(--muted);outline:none;border-bottom:1px dashed transparent;display:inline">Añadir nota...</span></div>`}
       </div>
-      <select onchange="setAlertField('${a.id}','status',this.value)" style="${SS};${sc}">
-        <option value="pendiente"${s==='pendiente'?' selected':''}>● Pendiente</option>
-        <option value="en_proceso"${s==='en_proceso'?' selected':''}>◐ En proceso</option>
-        <option value="hecho"${s==='hecho'?' selected':''}>✓ Hecho</option>
-      </select>
-      <button onclick="deleteAlert('${a.id}')" style="font-size:14px;background:none;border:none;cursor:pointer;color:var(--muted);padding:2px 4px;line-height:1" title="Eliminar">✕</button>
+      <div style="display:flex;flex-direction:column;gap:4px;align-items:flex-end;flex-shrink:0">
+        <select onchange="setAlertField('${a.id}','status',this.value)" style="${SS};${sc}">
+          <option value="pendiente"${s==='pendiente'?' selected':''}>● Pendiente</option>
+          <option value="en_proceso"${s==='en_proceso'?' selected':''}>◐ En proceso</option>
+          <option value="hecho"${s==='hecho'?' selected':''}>✓ Hecho</option>
+        </select>
+        <button onclick="convertAlertToTask('${a.id}')" style="font-size:10px;padding:2px 7px;border:1px solid var(--border);border-radius:4px;background:#fff;cursor:pointer;color:var(--slate);white-space:nowrap">→ Tarea</button>
+        <button onclick="deleteAlert('${a.id}')" style="font-size:14px;background:none;border:none;cursor:pointer;color:var(--muted);padding:2px 4px;line-height:1" title="Eliminar">✕</button>
+      </div>
     </div>`;
   };
   const hasFilter=_alertF.priority||_alertF.status||_alertF.date;
@@ -4485,6 +4561,11 @@ function setAlertField(id,field,value){
 }
 function toggleAlertDone(id){const p=getProject();const a=p.alerts.find(x=>x.id===id);if(a){a.done=!a.done;a.status=a.done?'hecho':'pendiente';}saveProject();updateBadges();renderAlerts();if(currentPage==='dashboard')renderDashboard();}
 function deleteAlert(id){if(confirm('¿Eliminar alerta?')){const p=getProject();p.alerts=p.alerts.filter(x=>x.id!==id);saveProject();updateBadges();renderAlerts();}}
+function convertAlertToTask(id){
+  const p=getProject();const a=p.alerts.find(x=>x.id===id);if(!a)return;
+  p.tasks.push({id:uid(),title:(a.type?a.type+': ':'')+a.description,responsible:'',due_date:a.due_date||'',priority:{Alta:'alta',Media:'media',Baja:'baja'}[a.priority]||'media',status:'pendiente',category:'alerta',tags:['alerta'],created_by:'user',notes:a.notes||''});
+  saveProject();updateBadges();showToast('Alerta convertida en tarea ✓','success',3000);
+}
 function saveAlert(){
   const p=getProject();
   const desc=document.getElementById('al-desc').value.trim();
@@ -4501,24 +4582,44 @@ function saveAlert(){
 // ══════════════════════════════════════════════════════
 function renderNotes(){
   const p=getProject();
+  const TAGS=['general','técnica','cliente','riesgo','decisión','interna'];
+  const TAG_COL={técnica:'var(--blue)',cliente:'var(--green)',riesgo:'var(--red)',decisión:'var(--amber)',interna:'var(--slate)',general:'#9CA3AF'};
   document.getElementById('page-notes').innerHTML=`
   <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px">
     ${p.notes_internal.slice().reverse().map(n=>`
-      <div class="card" style="border-left:3px solid ${{técnica:'var(--blue)',cliente:'var(--green)',riesgo:'var(--red)',decisión:'var(--amber)'}[n.tag]||'var(--slate)'}">
-        <div style="display:flex;justify-content:space-between;margin-bottom:6px">
-          <div style="font-size:13px;font-weight:600">${n.title||'Nota'}</div>
-          <span class="badge b-gray">${n.tag||'general'}</span>
+      <div class="card" style="border-left:3px solid ${TAG_COL[n.tag]||'#9CA3AF'};padding:12px">
+        <div style="margin-bottom:6px">
+          <span contenteditable="true" onfocus="this.style.outline='1px solid var(--blue)'" onblur="setNoteField('${n.id}','title',this.textContent.trim());this.style.outline=''" style="font-size:13px;font-weight:600;outline:none;display:block;min-height:1em">${n.title||'Nota'}</span>
         </div>
-        <div style="font-size:13px;color:var(--muted);line-height:1.6;margin-bottom:8px">${n.content}</div>
-        <div style="font-size:11px;color:var(--muted);display:flex;justify-content:space-between">
-          <span>${fmtDate(n.date||TODAY)}</span>
-          <button class="btn btn-xs btn-ghost" onclick="deleteNote('${n.id}')">✕</button>
+        <div style="font-size:13px;color:var(--muted);line-height:1.6;margin-bottom:8px;min-height:40px">
+          <span contenteditable="true" onfocus="this.style.outline='1px solid var(--blue)'" onblur="setNoteField('${n.id}','content',this.textContent.trim());this.style.outline=''" style="outline:none;display:block;white-space:pre-wrap">${n.content}</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;border-top:1px solid var(--border2);padding-top:8px">
+          <select onchange="setNoteField('${n.id}','tag',this.value)" style="font-size:11px;border:1px solid var(--border);border-radius:4px;padding:2px 5px;background:#fff;cursor:pointer;width:auto;outline:none;color:${TAG_COL[n.tag]||'#9CA3AF'}">
+            ${TAGS.map(tg=>`<option value="${tg}"${n.tag===tg?' selected':''}>${tg}</option>`).join('')}
+          </select>
+          <input type="date" value="${n.date||TODAY}" onchange="setNoteField('${n.id}','date',this.value)" style="font-size:11px;border:1px solid var(--border);border-radius:4px;padding:2px 4px;background:#fff;cursor:pointer;width:auto;color:var(--muted)">
+          <button onclick="convertNoteToTask('${n.id}')" style="font-size:10px;padding:2px 7px;border:1px solid var(--border);border-radius:4px;background:#fff;cursor:pointer;color:var(--slate);margin-left:auto;white-space:nowrap">→ Tarea</button>
+          <button onclick="deleteNote('${n.id}')" class="btn btn-xs btn-ghost" title="Eliminar">✕</button>
         </div>
       </div>`).join('')}
     ${p.notes_internal.length===0?'<div style="color:var(--muted);text-align:center;padding:32px;grid-column:1/-1">Sin notas. Añade la primera con el botón superior.</div>':''}
   </div>`;
 }
 
+function setNoteField(id,field,value){
+  if(!value&&(field==='title'||field==='content'))return;
+  const p=getProject();const n=p.notes_internal.find(x=>x.id===id);if(!n)return;
+  n[field]=value;
+  saveProject();
+  if(field==='tag')renderNotes();
+  showToast('Nota guardada','success',1500);
+}
+function convertNoteToTask(id){
+  const p=getProject();const n=p.notes_internal.find(x=>x.id===id);if(!n)return;
+  p.tasks.push({id:uid(),title:n.title||n.content.slice(0,60),responsible:'',due_date:'',priority:'media',status:'pendiente',category:'nota',tags:['nota'],created_by:'user',notes:n.content});
+  saveProject();updateBadges();showToast('Nota convertida en tarea ✓','success',3000);
+}
 function deleteNote(id){if(confirm('¿Eliminar nota?')){const p=getProject();p.notes_internal=p.notes_internal.filter(x=>x.id!==id);saveProject();renderNotes();}}
 function saveNote(){
   const p=getProject();
@@ -5426,22 +5527,31 @@ function iaBatchShowReview(results){
           </div>
           <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:6px">
             <span style="font-size:11px;color:#6B7280">Tipo:</span>
-            <select style="${chipSel}" onchange="iaBatchCorrectDoc(${idx},'tipo',this.value)">
+            <select style="${chipSel}" id="ia-rv-tipo-${idx}" onchange="iaBatchCorrectDoc(${idx},'tipo',this.value)">
               ${TIPOS.map(t=>`<option value="${t}"${t===tipo?' selected':''}>${TL[t]||t}</option>`).join('')}
             </select>
             <span style="font-size:11px;color:#9CA3AF">→</span>
             <span style="font-size:11px;color:#6B7280">Módulo:</span>
-            <select style="${chipSel}" onchange="iaBatchCorrectDoc(${idx},'modulo',this.value)">
+            <select style="${chipSel}" id="ia-rv-mod-${idx}" onchange="iaBatchCorrectDoc(${idx},'modulo',this.value)">
               ${MODS.map(m=>`<option value="${m}"${m===modulo?' selected':''}>${ML[m]}</option>`).join('')}
             </select>
             ${hasCap?`<span style="font-size:11px;color:#6B7280">Cap.:</span>
-            <select style="${chipSel};max-width:180px" onchange="iaBatchCorrectDoc(${idx},'capitulo',this.value)">
+            <select style="${chipSel};max-width:180px" id="ia-rv-cap-${idx}" onchange="iaBatchCorrectDoc(${idx},'capitulo',this.value)">
               <option value="">— sin capítulo —</option>
               ${p.budget.map(b=>`<option value="${b.id}"${(r.result?.presupuesto?.chapter_sugerido||'').includes(b.num)?' selected':''}>${b.num} ${b.desc.slice(0,22)}</option>`).join('')}
             </select>`:''}
           </div>
-          <div style="display:flex;gap:4px;flex-wrap:wrap">
+          <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:6px">
+            <span style="font-size:11px;color:#6B7280">Proveedor:</span>
+            <input id="ia-rv-prov-${idx}" value="${r.result?.proveedor?.nombre||''}" placeholder="Nombre proveedor" onchange="iaBatchCorrectDoc(${idx},'proveedor',this.value)" style="font-size:11px;padding:2px 8px;border:1px solid #D1D5DB;border-radius:20px;background:#fff;color:#374151;width:140px">
+            <span style="font-size:11px;color:#6B7280">Importe:</span>
+            <input id="ia-rv-imp-${idx}" type="number" value="${r.result?.datos_principales?.importe||r.result?.presupuesto?.total||r.result?.pago_o_factura?.importe||''}" placeholder="0" onchange="iaBatchCorrectDoc(${idx},'importe',this.value)" style="font-size:11px;padding:2px 8px;border:1px solid #D1D5DB;border-radius:20px;background:#fff;color:#374151;width:90px">
+            <span style="font-size:11px;color:#6B7280">Fecha:</span>
+            <input id="ia-rv-fecha-${idx}" type="date" value="${r.result?.datos_principales?.fecha_emision||r.result?.pago_o_factura?.fecha_pago||''}" onchange="iaBatchCorrectDoc(${idx},'fecha',this.value)" style="font-size:11px;padding:2px 8px;border:1px solid #D1D5DB;border-radius:20px;background:#fff;color:#374151;width:auto">
+          </div>
+          <div style="display:flex;gap:4px;flex-wrap:wrap;align-items:center">
             ${(r.applied||[]).map(a=>`<span style="font-size:11px;background:#fff;border:1px solid #E5E7EB;border-radius:20px;padding:2px 8px;color:#374151">${a}</span>`).join('')}
+            <button onclick="iaBatchReapplyDoc(${idx})" style="margin-left:auto;font-size:11px;padding:3px 10px;background:#1D4ED8;color:#fff;border:none;border-radius:6px;cursor:pointer;flex-shrink:0">Aplicar correcciones ↺</button>
           </div>
         </div>`;
       }).join('')}
@@ -5480,16 +5590,52 @@ function iaBatchCorrectDoc(idx,field,value){
     const provName=r.result?.proveedor?.nombre;
     if(provName){
       const prov=p.providers.find(pv=>pv.name===provName);
-      if(prov?.quotes?.length){
-        const q=prov.quotes[prov.quotes.length-1];
-        q.chapter_id=value;
-        const cap=p.budget.find(b=>b.id===value);
-        q.chapter_desc=cap?cap.desc:'';
-      }
+      if(prov?.quotes?.length){const q=prov.quotes[prov.quotes.length-1];q.chapter_id=value;const cap=p.budget.find(b=>b.id===value);q.chapter_desc=cap?cap.desc:'';}
     }
     showToast('Capítulo actualizado','success',2000);
+  }else if(field==='proveedor'){
+    if(r.result&&r.result.proveedor){r.result.proveedor.nombre=value;r.result.proveedor.detectado=!!value;}
+  }else if(field==='importe'){
+    const num=parseFloat(value)||0;
+    if(r.result){if(!r.result.datos_principales)r.result.datos_principales={};r.result.datos_principales.importe=num;if(r.result.presupuesto)r.result.presupuesto.total=num;if(r.result.pago_o_factura)r.result.pago_o_factura.importe=num;}
+  }else if(field==='fecha'){
+    if(r.result){if(!r.result.datos_principales)r.result.datos_principales={};r.result.datos_principales.fecha_emision=value;if(r.result.pago_o_factura)r.result.pago_o_factura.fecha_pago=value;}
   }
   saveProject();
+}
+
+function iaBatchReapplyDoc(idx){
+  const results=window._iaBatchReviewResults||[];
+  const r=results[idx];
+  if(!r||r.status!=='ok'||!r.result)return;
+  const p=getProject();
+  // Read any edits from DOM inputs
+  const el=v=>document.getElementById(v);
+  if(el('ia-rv-prov-'+idx))iaBatchCorrectDoc(idx,'proveedor',el('ia-rv-prov-'+idx).value);
+  if(el('ia-rv-imp-'+idx))iaBatchCorrectDoc(idx,'importe',el('ia-rv-imp-'+idx).value);
+  if(el('ia-rv-fecha-'+idx))iaBatchCorrectDoc(idx,'fecha',el('ia-rv-fecha-'+idx).value);
+  // Re-apply to project with updated result
+  try{
+    const doc=p.documents.find(d=>d.id===r.docId);
+    if(doc){
+      // Update doc fields
+      const main=r.result.datos_principales||{};
+      if(main.importe>0&&doc){doc.notes=(doc.notes||'')+' [imp:'+main.importe+']';}
+      if(main.fecha_emision)doc.uploaded_at=main.fecha_emision;
+    }
+    // If proveedor changed, try to find/create
+    const pv=r.result.proveedor||{};
+    if(pv.detectado&&pv.nombre){
+      let prov=p.providers.find(x=>x.name.toLowerCase()===pv.nombre.toLowerCase());
+      if(!prov){
+        prov={id:uid(),scope:'project',name:pv.nombre,category:pv.categoria||'general',location:{city:p.meta?.city||''},contact:{email:'',phone:'',web:''},status:'contactado',rating:null,notes:'',quotes:[],origin:'ia'};
+        p.providers.push(prov);
+      }
+    }
+    saveProject();
+    r.applied=(r.applied||[]).concat(['✎ Correcciones aplicadas']);
+    showToast('Correcciones aplicadas a '+r.item.name,'success',3000);
+  }catch(e){showToast('Error al re-aplicar: '+e.message,'error',4000);}
 }
 
 function closeIaReview(){const el=document.getElementById('ia-review-overlay');if(el)el.remove();}
