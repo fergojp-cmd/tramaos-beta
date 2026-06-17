@@ -4353,13 +4353,6 @@ function renderIAImport(){
     <div style="background:var(--green-bg);border-radius:var(--r);padding:10px 14px;margin-bottom:14px;font-size:12px;color:#15803D">
       Arrastra todos los documentos juntos. La IA los analiza uno a uno automáticamente y los aplica al proyecto.
     </div>
-    <div style="margin-bottom:14px">
-      <label class="form-label">🔑 API Key de Anthropic <span style="font-weight:400;color:var(--muted)">(se guarda solo en este navegador)</span></label>
-      <input type="password" id="ia-api-key" placeholder="sk-ant-..." value="${localStorage.getItem('tramaos_api_key')||''}"
-        oninput="localStorage.setItem('tramaos_api_key',this.value)"
-        style="font-family:monospace">
-      <div style="font-size:11px;color:var(--muted);margin-top:4px">Necesaria para que la IA procese documentos. Consigue una en <a href="https://console.anthropic.com" target="_blank" style="color:var(--slate)">console.anthropic.com</a></div>
-    </div>
     <div id="ia-dropzone" style="border:2px dashed var(--border);border-radius:var(--r);padding:32px;text-align:center;cursor:pointer;margin-bottom:14px;transition:all .15s;min-height:140px;display:flex;flex-direction:column;align-items:center;justify-content:center"
       onclick="document.getElementById('ia-file-in').click()"
       ondrop="iaBatchDrop(event)"
@@ -4650,11 +4643,9 @@ REGLAS IMPORTANTES:
   }
   content.push({type:'text',text:'Analiza este documento exhaustivamente y devuelve el JSON completo.'});
 
-  const apiKey=localStorage.getItem('tramaos_api_key')||(document.getElementById('ia-api-key')?.value||'');
-  if(!apiKey){throw new Error('Falta la API Key de Anthropic. Añádela arriba en el campo API Key.');}
-  const res=await fetch('https://api.anthropic.com/v1/messages',{
+  const res=await fetch('/api/chat',{
     method:'POST',
-    headers:{'Content-Type':'application/json','anthropic-version':'2023-06-01','x-api-key':apiKey,'anthropic-dangerous-direct-browser-access':'true'},
+    headers:{'Content-Type':'application/json'},
     body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:4096,system:sys,messages:[{role:'user',content}]})
   });
   if(!res.ok){const e=await res.json();const msg=e.error?.message||'Error '+res.status;console.error('[IA-Import] API error:',msg,e);throw new Error(msg);}
