@@ -4477,6 +4477,7 @@ async function iaBatchStart(){
   document.getElementById('ia-batch-btn').disabled=true;
   const total=_iaBatchQueue.length;
   let done=0;let errors=0;
+  const _importedResults=[];
   for(const item of _iaBatchQueue){
     document.getElementById('ia-batch-current-label').textContent='Analizando: '+item.name;
     document.getElementById('ia-batch-counter').textContent=(done+1)+' / '+total;
@@ -4485,7 +4486,14 @@ async function iaBatchStart(){
     if(sb){sb.textContent='Analizando...';sb.className='badge b-blue';}
     try{
       const result=await iaBatchAnalyzeOne(item);
+      // Si tipo desconocido o baja confianza → preguntar al usuario
+      if(!result.tipo_documento||result.tipo_documento==='otro'){
+        if(sb){sb.textContent='Clasificando...';sb.className='badge b-amber';}
+        const userType=await iaBatchAskType(item,result);
+        if(userType)result.tipo_documento=userType;
+      }
       const applied=iaBatchApplyOne(result,item);
+      _importedResults.push({item,result,applied,status:'ok'});
       if(sb){sb.textContent='✓ Aplicado';sb.className='badge b-green';}
       const resEl=document.getElementById('ia-batch-results');
       const div=document.createElement('div');
@@ -4495,6 +4503,7 @@ async function iaBatchStart(){
       resEl.appendChild(div);
     }catch(err){
       errors++;
+      _importedResults.push({item,error:err.message,status:'error'});
       if(sb){sb.textContent='✗ Error';sb.className='badge b-red';}
       const resEl=document.getElementById('ia-batch-results');
       const div=document.createElement('div');
@@ -4515,7 +4524,7 @@ async function iaBatchStart(){
   _iaBatchProcessing=false;
   saveProject();updateBadges();
   showToast((done-errors)+' documento(s) importados','success',4000);
-  setTimeout(()=>renderIAImport(),1500);
+  setTimeout(()=>{iaBatchShowReview(_importedResults);renderIAImport();},600);
 }
 
 async function iaBatchAnalyzeOne(item){
@@ -4646,13 +4655,34 @@ REGLAS IMPORTANTES:
   const res=await fetch('https://api.anthropic.com/v1/messages',{
     method:'POST',
     headers:{'Content-Type':'application/json','anthropic-version':'2023-06-01','x-api-key':apiKey,'anthropic-dangerous-direct-browser-access':'true'},
-    body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:2500,system:sys,messages:[{role:'user',content}]})
+    body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:4096,system:sys,messages:[{role:'user',content}]})
   });
-  if(!res.ok){const e=await res.json();throw new Error(e.error?.message||'Error '+res.status);}
+  if(!res.ok){const e=await res.json();const msg=e.error?.message||'Error '+res.status;console.error('[IA-Import] API error:',msg,e);throw new Error(msg);}
   const data=await res.json();
   const raw=data.content[0]?.text||'';
-  const m=raw.match(/\{[\s\S]*\}/);
-  return JSON.parse(m?m[0]:raw);
+  console.log('[IA-Import] Raw response for',item.name,'(primeros 300 chars):',raw.slice(0,300));
+  // Robust JSON extraction: try multiple strategies
+  let parsed=null;
+  try{parsed=JSON.parse(raw);}catch(_){
+    try{
+      // Strip markdown code fences
+      const stripped=raw.replace(/^```(?:json)?\s*/,'').replace(/\s*```\s*$/,'');
+      parsed=JSON.parse(stripped);
+    }catch(_2){
+      try{
+        // Extract outermost {...} block
+        const m=raw.match(/\{[\s\S]*\}/);
+        if(!m)throw new Error('Sin bloque JSON en respuesta');
+        parsed=JSON.parse(m[0]);
+      }catch(e3){
+        console.error('[IA-Import] JSON parse error para',item.name,':',raw.slice(0,500));
+        throw new Error('La IA devolvió JSON inválido: '+e3.message);
+      }
+    }
+  }
+  if(!parsed||typeof parsed!=='object')throw new Error('Respuesta vacía o inválida de la IA');
+  console.log('[IA-Import] OK:',item.name,'→ tipo:',parsed.tipo_documento,'proveedor:',parsed.proveedor?.detectado,'presupuesto:',parsed.presupuesto?.es_presupuesto,'pago:',parsed.pago_o_factura?.es_pago);
+  return parsed;
 }
 
 
@@ -4751,13 +4781,14 @@ function iaBatchApplyOne(d,item){
   }
 
   // ─── 3. PRESUPUESTO DE PROVEEDOR ─────────────────────
-  if(pres.es_presupuesto&&pres.total>0){
+  const _provTotal=pres.total>0?pres.total:(pres.partidas||[]).reduce((s,pt)=>s+(pt.total||pt.precio_unitario*pt.cantidad||0),0);
+  if(pres.es_presupuesto&&d.tipo_documento!=='presupuesto_obra'&&_provTotal>0){
     // Encontrar capítulo más cercano
     const cap=findBestChapter(p.budget, pres.chapter_sugerido||'');
     if(provRef){
       if(!provRef.quotes)provRef.quotes=[];
       provRef.quotes.push({
-        id:uid(),amount:pres.total,
+        id:uid(),amount:_provTotal,
         chapter_id:cap?.id||'',chapter_desc:cap?.desc||pres.chapter_sugerido||'',
         deadline:pres.plazo_entrega||'',
         valid_until:pres.validez||main.fecha_vencimiento||'',
@@ -4767,8 +4798,8 @@ function iaBatchApplyOne(d,item){
       });
       if(provRef.status==='por_contactar')provRef.status='en_evaluacion';
     }
-    if(cap){applied.push('◈ Cotización '+fmt(pres.total,cur)+' en cap. '+cap.num+' '+cap.desc.slice(0,20));}
-    else{applied.push('◈ Cotización '+fmt(pres.total,cur)+' (capítulo por asignar)');}
+    if(cap){applied.push('◈ Cotización '+fmt(_provTotal,cur)+' en cap. '+cap.num+' '+cap.desc.slice(0,20));}
+    else{applied.push('◈ Cotización '+fmt(_provTotal,cur)+' (capítulo por asignar)');}
   }
 
   // ─── 3B. PRESUPUESTO DE OBRA (emitido por el studio al cliente) ─────
@@ -4981,6 +5012,107 @@ function iaBatchApplyOne(d,item){
 
   return applied; // Return what was applied for UI display
 }
+
+// ── Diálogo para clasificación manual cuando la IA devuelve "otro" ───────────
+function iaBatchAskType(item,result){
+  return new Promise(resolve=>{
+    const overlay=document.createElement('div');
+    overlay.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px';
+    const tipos=[
+      {v:'presupuesto_obra',l:'📊 Presupuesto de obra (nuestro)'},
+      {v:'presupuesto_proveedor',l:'💬 Presupuesto de proveedor'},
+      {v:'factura',l:'💰 Factura / Pago'},
+      {v:'contrato',l:'📋 Contrato'},
+      {v:'licencia',l:'📜 Licencia / Permiso'},
+      {v:'certificado',l:'✅ Certificado'},
+      {v:'seguro',l:'🛡️ Seguro'},
+      {v:'cronograma',l:'📅 Cronograma'},
+      {v:'plano_arquitectura',l:'📐 Plano de arquitectura'},
+      {v:'plano_especialidad',l:'🔧 Plano de especialidad'},
+      {v:'email',l:'📧 Email / Comunicación'},
+      {v:'acta_reunion',l:'📝 Acta de reunión'},
+      {v:'otro',l:'📁 Otro (solo guardar)'},
+    ];
+    overlay.innerHTML=`<div style="background:#fff;border-radius:12px;width:100%;max-width:420px;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.3)">
+      <div style="padding:16px 20px;border-bottom:1px solid #E5E7EB;background:#F9FAFB">
+        <div style="font-weight:700;font-size:15px;margin-bottom:4px">Clasificar documento manualmente</div>
+        <div style="font-size:12px;color:#6B7280">La IA no pudo identificar el tipo de <strong>${item.name}</strong>. Selecciona el tipo correcto:</div>
+        ${result.resumen?`<div style="font-size:11px;color:#9CA3AF;margin-top:6px;padding:6px 8px;background:#fff;border-radius:6px;border:1px solid #E5E7EB">${result.resumen.slice(0,150)}${result.resumen.length>150?'…':''}</div>`:''}
+      </div>
+      <div style="padding:10px 16px;display:grid;grid-template-columns:1fr 1fr;gap:6px;max-height:260px;overflow-y:auto">
+        ${tipos.map(t=>`<button onclick="this.closest('.ia-ask-overlay').dataset.val='${t.v}'" style="text-align:left;padding:8px 10px;border:1px solid #E5E7EB;border-radius:8px;background:#fff;cursor:pointer;font-size:12px;transition:all .1s" onmouseover="this.style.background='#F0FDF4';this.style.borderColor='#86EFAC'" onmouseout="this.style.background='#fff';this.style.borderColor='#E5E7EB'">${t.l}</button>`).join('')}
+      </div>
+      <div style="padding:12px 16px;border-top:1px solid #E5E7EB;display:flex;justify-content:space-between;gap:8px">
+        <button onclick="this.closest('.ia-ask-overlay').dataset.val='_skip'" style="padding:8px 16px;border:1px solid #E5E7EB;border-radius:8px;background:#fff;cursor:pointer;font-size:13px;color:#6B7280">Omitir</button>
+        <button onclick="this.closest('.ia-ask-overlay').dataset.val='_skip'" style="padding:8px 16px;border:1px solid #E5E7EB;border-radius:8px;background:#fff;cursor:pointer;font-size:13px;color:#6B7280">Solo guardar en documentos</button>
+      </div>
+    </div>`;
+    overlay.className='ia-ask-overlay';
+    document.body.appendChild(overlay);
+    // Poll for user selection via dataset (simpler than many event listeners)
+    const poll=setInterval(()=>{
+      const val=overlay.dataset.val;
+      if(val){clearInterval(poll);document.body.removeChild(overlay);resolve(val==='_skip'?null:val);}
+    },80);
+    // Also handle direct button clicks within the grid
+    overlay.addEventListener('click',e=>{
+      const btn=e.target.closest('button[onclick]');
+      if(btn){
+        const val=overlay.dataset.val;
+        if(val){clearInterval(poll);document.body.removeChild(overlay);resolve(val==='_skip'?null:val);}
+      }
+    });
+  });
+}
+
+// ── Modal de revisión post-importación ───────────────────────────────────────
+function iaBatchShowReview(results){
+  if(!results||!results.length)return;
+  const ok=results.filter(r=>r.status==='ok');
+  const errs=results.filter(r=>r.status==='error');
+  if(!ok.length&&!errs.length)return;
+  const overlay=document.createElement('div');
+  overlay.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9998;display:flex;align-items:center;justify-content:center;padding:16px';
+  const TIPO_LABELS={presupuesto_obra:'Presupuesto Obra',presupuesto_proveedor:'Presupuesto Proveedor',factura:'Factura',pago:'Pago',albaran:'Albarán',contrato:'Contrato',permiso:'Permiso',licencia:'Licencia',certificado:'Certificado',plano_arquitectura:'Plano Arq.',plano_especialidad:'Plano Esp.',cronograma:'Cronograma',email:'Email',acta_reunion:'Acta Reunión',informe:'Informe',seguro:'Seguro',otro:'Otro'};
+  const MODULE_LINKS={presupuesto_obra:'budget',presupuesto_proveedor:'providers',factura:'payments',pago:'payments',contrato:'documents',licencia:'documents',certificado:'documents',plano_arquitectura:'documents',plano_especialidad:'documents',cronograma:'schedule',seguro:'documents',email:'notes',acta_reunion:'notes'};
+  const modules=new Set(ok.map(r=>MODULE_LINKS[r.result?.tipo_documento]).filter(Boolean));
+  overlay.innerHTML=`<div style="background:#fff;border-radius:12px;width:100%;max-width:560px;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.3);max-height:90vh;display:flex;flex-direction:column">
+    <div style="padding:16px 20px;border-bottom:1px solid #E5E7EB;background:#F9FAFB;display:flex;align-items:center;gap:10px">
+      <div style="font-size:22px">✦</div>
+      <div>
+        <div style="font-weight:700;font-size:15px">Importación completada</div>
+        <div style="font-size:12px;color:#6B7280">${ok.length} aplicado(s)${errs.length?' · '+errs.length+' error(s)':''}</div>
+      </div>
+    </div>
+    <div style="flex:1;overflow-y:auto;padding:14px 20px;display:flex;flex-direction:column;gap:8px">
+      ${ok.map(r=>`<div style="padding:10px 12px;background:#F0FDF4;border-radius:8px;border-left:3px solid #22C55E">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:5px">
+          <span style="font-size:13px">📄</span>
+          <strong style="font-size:13px;flex:1">${r.item.name}</strong>
+          <span style="font-size:10px;background:#DCFCE7;color:#166534;padding:2px 7px;border-radius:20px">${TIPO_LABELS[r.result?.tipo_documento]||r.result?.tipo_documento||'doc'}</span>
+        </div>
+        <div style="display:flex;gap:5px;flex-wrap:wrap">
+          ${(r.applied||[]).map(a=>`<span style="font-size:11px;background:#fff;border-radius:20px;padding:2px 8px;color:#374151">${a}</span>`).join('')}
+        </div>
+      </div>`).join('')}
+      ${errs.map(r=>`<div style="padding:10px 12px;background:#FEF2F2;border-radius:8px;border-left:3px solid #EF4444;font-size:12px">
+        <strong>✗ ${r.item.name}</strong> — ${r.error}
+      </div>`).join('')}
+    </div>
+    ${modules.size?`<div style="padding:10px 20px;border-top:1px solid #E5E7EB;background:#F9FAFB">
+      <div style="font-size:11px;color:#6B7280;margin-bottom:6px;text-transform:uppercase;letter-spacing:.05em">Módulos actualizados — ir a:</div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap">
+        ${[...modules].map(m=>`<button onclick="closeIaReview();nav(document.querySelector('[data-page=\\'${m}\\']'))" style="padding:5px 12px;border:1px solid #E5E7EB;border-radius:20px;background:#fff;cursor:pointer;font-size:12px;font-weight:500">${{budget:'Presupuesto',providers:'Proveedores',payments:'Pagos',schedule:'Cronograma',documents:'Documentos',notes:'Notas',alerts:'Alertas'}[m]||m}</button>`).join('')}
+      </div>
+    </div>`:''}
+    <div style="padding:12px 20px;border-top:1px solid #E5E7EB;display:flex;justify-content:flex-end">
+      <button onclick="closeIaReview()" style="padding:9px 22px;background:#16A34A;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600">Cerrar revisión</button>
+    </div>
+  </div>`;
+  overlay.id='ia-review-overlay';
+  document.body.appendChild(overlay);
+}
+function closeIaReview(){const el=document.getElementById('ia-review-overlay');if(el)el.remove();}
 
 function iaHandleDrop(e){e.preventDefault();iaBatchDrop(e);}
 function iaHandleFile(input){iaBatchSelect(input);}
