@@ -849,6 +849,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--slate);box-shadow:0 0
   </div>
 </div>
 
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js" crossorigin="anonymous"></script>
 <script>
 // TramaOS — Data Layer + Core Logic
 // All state management, localStorage, project switching
@@ -4635,11 +4636,11 @@ function iaBatchLoadFiles(files){
   const valid=files.filter(f=>f.type.startsWith('image/')||f.type==='application/pdf');
   if(!valid.length)return;
   if(valid.length>20){showToast('Máximo 20 archivos. Se toman los primeros 20.','warning');valid.splice(20);}
-  // Límite real de Vercel: 4.5MB — umbral conservador 4MB
-  const MAX_BYTES=4*1024*1024;
+  // PDFs >3.5MB se dividen con PDF.js. Límite absoluto: 20MB
+  const MAX_BYTES=20*1024*1024;
   const oversized=valid.filter(f=>f.size>MAX_BYTES);
   if(oversized.length){
-    oversized.forEach(f=>showToast('⚠ '+f.name+' ('+(f.size/1024/1024).toFixed(1)+'MB) es demasiado grande — comprime el PDF antes de subirlo.','warning',8000));
+    oversized.forEach(f=>showToast('⚠ '+f.name+' ('+(f.size/1024/1024).toFixed(1)+'MB) supera 20MB — demasiado grande incluso para dividir.','warning',8000));
     valid.splice(0,valid.length,...valid.filter(f=>f.size<=MAX_BYTES));
   }
   if(!valid.length)return;
@@ -4700,7 +4701,8 @@ async function iaBatchStart(){
       const resEl=document.getElementById('ia-batch-results');
       const div=document.createElement('div');
       div.style.cssText='padding:10px 12px;background:var(--green-bg);border-radius:8px;border-left:3px solid var(--green);margin-bottom:4px';
-      div.innerHTML='<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><span style="font-size:16px">✓</span><strong style="font-size:13px">'+item.name+'</strong><span class="badge b-gray" style="font-size:10px">'+(result.tipo_documento||'doc')+'</span></div>'
+      const splitBadge=result._split_parts>1?'<span class="badge b-blue" style="font-size:10px">✂ '+result._split_parts+' partes</span>':'';
+      div.innerHTML='<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><span style="font-size:16px">✓</span><strong style="font-size:13px">'+item.name+'</strong><span class="badge b-gray" style="font-size:10px">'+(result.tipo_documento||'doc')+'</span>'+splitBadge+'</div>'
         +'<div style="display:flex;gap:6px;flex-wrap:wrap">'+(applied||[]).map(a=>'<span style="font-size:11px;background:#fff;border-radius:20px;padding:2px 8px;color:var(--slate)">'+a+'</span>').join('')+'</div>';
       resEl.appendChild(div);
     }catch(err){
@@ -4843,6 +4845,14 @@ REGLAS IMPORTANTES:
 - Tipo indicado por el usuario: ${document.getElementById('ia-doc-type')?.value||'auto'} (si es distinto de 'auto', úsalo como tipo_documento salvo evidencia contraria muy clara).
 - Instrucción extra: ${document.getElementById('ia-extra')?.value||'ninguna'}`;
 
+  // Si el PDF supera 3.5MB, dividir en páginas con PDF.js
+  const _SPLIT_THRESH=3.5*1024*1024;
+  const _b64Size=item.b64?Math.round(item.b64.length*0.75):0;
+  if(item.type==='application/pdf'&&_b64Size>_SPLIT_THRESH){
+    console.log('[IA-Split]',item.name,'-',Math.round(_b64Size/1024/1024*10)/10+'MB > 3.5MB — activando PDF split');
+    return await iaBatchSplitAndAnalyze(item,sys);
+  }
+
   const content=[];
   if(item.type==='application/pdf'){
     content.push({type:'document',source:{type:'base64',media_type:'application/pdf',data:item.b64}});
@@ -4887,6 +4897,115 @@ REGLAS IMPORTANTES:
   return parsed;
 }
 
+
+// ─── PDF Split: render pages as JPEG images and analyze in chunks ─────────────
+function _iaParse(raw){
+  try{return JSON.parse(raw);}catch(_){}
+  try{return JSON.parse(raw.replace(/^```(?:json)?\s*/,'').replace(/\s*```\s*$/,''));}catch(_){}
+  try{const m=raw.match(/\{[\s\S]*\}/);if(m)return JSON.parse(m[0]);}catch(_){}
+  return null;
+}
+
+function mergeIAPartResults(results,totalParts){
+  if(!results.length)return null;
+  if(results.length===1)return{...results[0],_split_parts:totalParts||1};
+  const base=results[0];
+  // Partidas: combine all non-empty
+  const allPartidas=results.flatMap(r=>r.presupuesto?.partidas||[]).filter(p=>p.descripcion&&p.total>0);
+  // Total: take the largest declared total, fallback to sum of partidas
+  const declaredTotals=results.map(r=>r.presupuesto?.total||0).filter(t=>t>0);
+  const bestTotal=declaredTotals.length?Math.max(...declaredTotals):allPartidas.reduce((s,p)=>s+(p.total||0),0);
+  // Take first detected proveedor / pago / contrato
+  const provR=results.find(r=>r.proveedor?.detectado&&r.proveedor?.nombre)||base;
+  const pagoR=results.find(r=>r.pago_o_factura?.es_pago&&r.pago_o_factura?.importe>0)||base;
+  const ctR=results.find(r=>r.contrato?.es_contrato)||base;
+  const comR=results.find(r=>r.comunicacion?.es_comunicacion)||base;
+  // Cronograma fases + hitos
+  const allFases=results.flatMap(r=>r.cronograma?.fases_detectadas||[]).filter(f=>f.nombre);
+  const allHitos=results.flatMap(r=>r.cronograma?.hitos_detectados||[]).filter(h=>h.descripcion);
+  // Alertas and tareas deduplicated
+  const _seen=new Set();
+  const allAlertas=results.flatMap(r=>r.alertas||[]).filter(a=>{if(!a.descripcion||_seen.has(a.descripcion))return false;_seen.add(a.descripcion);return true;});
+  const _seenT=new Set();
+  const allTareas=results.flatMap(r=>r.tareas_generadas||[]).filter(t=>{if(!t.titulo||_seenT.has(t.titulo))return false;_seenT.add(t.titulo);return true;});
+  const resumen=results.map(r=>r.resumen).filter(Boolean)[0]||'';
+  return{
+    ...base,
+    resumen,
+    proveedor:provR.proveedor||base.proveedor,
+    pago_o_factura:pagoR.pago_o_factura||base.pago_o_factura,
+    contrato:ctR.contrato||base.contrato,
+    comunicacion:comR.comunicacion||base.comunicacion,
+    presupuesto:{...(base.presupuesto||{}),es_presupuesto:results.some(r=>r.presupuesto?.es_presupuesto),total:bestTotal,partidas:allPartidas,chapter_sugerido:base.presupuesto?.chapter_sugerido||''},
+    cronograma:{fases_detectadas:allFases,hitos_detectados:allHitos},
+    alertas:allAlertas,
+    tareas_generadas:allTareas,
+    _split_parts:totalParts||results.length,
+    _merged:true,
+  };
+}
+
+async function iaBatchSplitAndAnalyze(item,sys){
+  // Ensure PDF.js is ready
+  if(typeof pdfjsLib==='undefined')throw new Error('PDF.js no cargado — verifica conexión a Internet');
+  if(!pdfjsLib.GlobalWorkerOptions.workerSrc){
+    pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+  }
+
+  // Decode base64 → Uint8Array
+  const bin=atob(item.b64);
+  const bytes=new Uint8Array(bin.length);
+  for(let i=0;i<bin.length;i++)bytes[i]=bin.charCodeAt(i);
+
+  let pdf;
+  try{pdf=await pdfjsLib.getDocument({data:bytes}).promise;}
+  catch(e){throw new Error('PDF.js no pudo abrir el PDF: '+e.message);}
+
+  const numPages=pdf.numPages;
+  const PAGES_PER_CHUNK=5;
+  const numChunks=Math.ceil(numPages/PAGES_PER_CHUNK);
+  console.log('[IA-Split]',item.name,'→',numPages,'páginas →',numChunks,'partes');
+
+  // Progress label
+  const lbl=document.getElementById('ia-batch-current-label');
+  const partResults=[];
+
+  for(let chunk=0;chunk<numChunks;chunk++){
+    const startPage=chunk*PAGES_PER_CHUNK+1;
+    const endPage=Math.min((chunk+1)*PAGES_PER_CHUNK,numPages);
+    if(lbl)lbl.textContent='Procesando '+item.name+' (páginas '+startPage+'–'+endPage+' de '+numPages+')';
+
+    // Render pages → JPEG images
+    const pageImages=[];
+    for(let pn=startPage;pn<=endPage;pn++){
+      const page=await pdf.getPage(pn);
+      const vp=page.getViewport({scale:1.5});
+      const canvas=document.createElement('canvas');
+      canvas.width=vp.width;canvas.height=vp.height;
+      await page.render({canvasContext:canvas.getContext('2d'),viewport:vp}).promise;
+      pageImages.push(canvas.toDataURL('image/jpeg',0.82).split(',')[1]);
+    }
+
+    // Build content: one image block per page
+    const chunkContent=pageImages.map(b64=>({type:'image',source:{type:'base64',media_type:'image/jpeg',data:b64}}));
+    chunkContent.push({type:'text',text:'Páginas '+startPage+' a '+endPage+' de '+numPages+' del documento "'+item.name+'" (parte '+(chunk+1)+' de '+numChunks+'). Extrae toda la información posible y devuelve el JSON completo. Si son páginas de un presupuesto extrae TODAS las partidas con importes.'});
+
+    const res=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:4096,system:sys,messages:[{role:'user',content:chunkContent}]})});
+    if(!res.ok){const e=await res.json().catch(()=>({}));throw new Error(e.error?.message||'Error '+res.status+' en parte '+(chunk+1)+'/'+numChunks);}
+    const data=await res.json();
+    const parsed=_iaParse(data.content[0]?.text||'');
+    if(parsed)partResults.push(parsed);
+    else console.warn('[IA-Split] Parte '+(chunk+1)+' no devolvió JSON válido');
+
+    if(chunk<numChunks-1)await new Promise(r=>setTimeout(r,600));
+  }
+
+  if(!partResults.length)throw new Error('PDF dividido en '+numChunks+' partes pero ninguna devolvió datos válidos');
+  const merged=mergeIAPartResults(partResults,numChunks);
+  console.log('[IA-Split] Merge OK:',item.name,'— tipo:',merged.tipo_documento,'partidas:',merged.presupuesto?.partidas?.length||0);
+  return merged;
+}
 
 function findBestChapter(budget, suggested){
   if(!suggested||!budget?.length)return null;
@@ -5302,6 +5421,7 @@ function iaBatchShowReview(results){
         return `<div style="padding:10px 12px;background:#F0FDF4;border-radius:8px;border-left:3px solid #22C55E">
           <div style="display:flex;align-items:center;gap:8px;margin-bottom:7px">
             <span>📄</span><strong style="font-size:13px;flex:1">${r.item.name}</strong>
+            ${r.result?._split_parts>1?`<span style="font-size:10px;background:#EFF6FF;color:#1D4ED8;padding:2px 7px;border-radius:20px;font-weight:600">✂ PDF dividido en ${r.result._split_parts} partes</span>`:''}
             <span style="font-size:10px;color:#6B7280">${r.item.size_kb||''}KB</span>
           </div>
           <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:6px">
