@@ -118,6 +118,8 @@ input:focus,select:focus,textarea:focus{border-color:var(--slate);box-shadow:0 0
 .g-track{background:#F3F4F6;border-radius:4px;height:26px;position:relative}
 .g-bar{height:26px;border-radius:4px;position:absolute;display:flex;align-items:center;padding:0 8px;font-size:11px;color:#fff;font-weight:500;white-space:nowrap;overflow:hidden;cursor:pointer;transition:opacity .12s}
 .g-bar:hover{opacity:.85}
+.g-bar-active{animation:barPulse 2s ease-in-out infinite}
+@keyframes barPulse{0%,100%{opacity:1}50%{opacity:.6}}
 .g-today{position:absolute;top:0;bottom:0;width:2px;background:var(--red);opacity:.6;pointer-events:none}
 .g-months{display:grid;font-size:10px;color:var(--muted);text-align:center}
 /* ── Doc items ────────────────────────────── */
@@ -1614,16 +1616,24 @@ function renderSchedule() {
       <div style="background:${zm.bg};border-radius:4px;border:1px solid ${zm.border};height:22px"></div>
     </div>`;
     zPhases.forEach(t=>{
-      const barColor=statusColors[t.status]||t.color||'#6B7280';
+      // CAMBIO 1: Custom color takes priority for pendiente/en_curso; status color for completado/retrasado/pausado
+      const barColor=(t.status==='completado'||t.status==='retrasado'||t.status==='pausado')
+        ?statusColors[t.status]
+        :(t.color||statusColors[t.status]||'#6B7280');
       const isDone=t.status==='completado';
+      const isActive=t.status==='en_curso';
       const isLate=t.status==='retrasado';
       const barText=t.dur>1?t.dur+(isWeeks?'s':'m'):'';
+      // CAMBIO 2: Visual state indicators
+      const labelDecor=isDone?'text-decoration:line-through;':'';
+      const labelColor=isLate?'var(--red)':isDone?'var(--muted)':isActive?'var(--blue)':'var(--ink)';
+      const statePrefix=isDone?'✓ ':isActive?'<span style="display:inline-block;width:7px;height:7px;background:#2563EB;border-radius:50%;margin-right:5px;flex-shrink:0"></span>':isLate?'⚠ ':'';
       rows+=`<div class="gantt-row" style="margin-bottom:5px">
-        <div class="g-label" style="font-size:11px;cursor:pointer;color:${isLate?'var(--red)':isDone?'var(--muted)':'var(--ink)'};padding-left:10px" onclick="editGanttTask('${t.id}')" title="Editar: ${t.label}">
-          ${isDone?'✓ ':''}${isLate?'⚠ ':''}${t.label.replace(/^FASE \d+ · /,'')}
+        <div class="g-label" style="font-size:11px;cursor:pointer;color:${labelColor};padding-left:10px;${labelDecor}display:flex;align-items:center" onclick="editGanttTask('${t.id}')" title="Editar: ${t.label}">
+          ${statePrefix}${t.label.replace(/^FASE \d+ · /,'')}
         </div>
         <div class="g-track" style="cursor:pointer" onclick="editGanttTask('${t.id}')">
-          <div class="g-bar" style="left:${t.start/TOTAL*100}%;width:${Math.max(t.dur,1)/TOTAL*100}%;background:${barColor};opacity:${isDone?.55:1};position:relative" title="${t.label}">${barText}${t.notes?'<span style="position:absolute;right:4px;top:50%;transform:translateY(-50%);font-size:10px">📝</span>':''}</div>
+          <div class="g-bar${isActive?' g-bar-active':''}" style="left:${t.start/TOTAL*100}%;width:${Math.max(t.dur,1)/TOTAL*100}%;background:${barColor};opacity:${isDone?.5:1};position:relative;${isDone?'background:linear-gradient(90deg,'+barColor+',#16A34A);':''}" title="${t.label}">${isDone?'✓ '+barText:barText}${t.notes?'<span style="position:absolute;right:4px;top:50%;transform:translateY(-50%);font-size:10px">📝</span>':''}</div>
           <div class="g-today" style="left:${unitProgress/TOTAL*100}%"></div>
         </div>
       </div>`;
@@ -1706,6 +1716,31 @@ function renderSchedule() {
       ${p.schedule.length===0?'<tr><td colspan="8" style="color:var(--muted);text-align:center;padding:16px">Sin fases. Añade la primera con + Fase.</td></tr>':''}
     </table>
   </div>`}
+
+  <!-- INFORMES SEMANALES -->
+  <div class="card" style="margin-top:14px">
+    <div class="card-title">📅 Informes Semanales
+      <div style="display:flex;gap:8px;align-items:center">
+        <span style="font-size:12px;font-weight:400;color:var(--muted)">${(p.weekly_reports||[]).length} semana(s) con actividad</span>
+        <button onclick="addWeeklyReport()" class="btn btn-ghost btn-sm">+ Semana manual</button>
+      </div>
+    </div>
+    ${!(p.weekly_reports||[]).length?'<div style="color:var(--muted);font-size:13px;padding:8px 0">Las fases completadas se registran aquí automáticamente.</div>':
+      (p.weekly_reports||[]).slice().sort((a,b)=>b.week_key.localeCompare(a.week_key)).map(wr=>`
+      <div style="border-bottom:1px solid var(--border2);padding:12px 0">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;flex-wrap:wrap">
+          <span style="font-weight:600;font-size:13px">Semana ${wr.week_num} / ${wr.year} — ${fmtDate(wr.week_date)}</span>
+          <span class="badge b-green" style="font-size:10px">${wr.completed_phases.length} fase(s) completada(s)</span>
+        </div>
+        <div style="margin-bottom:8px">
+          ${wr.completed_phases.map(ph=>`<div style="font-size:12px;color:var(--muted);padding:1px 0;display:flex;align-items:center;gap:6px"><span style="color:var(--green)">✓</span><span>${ph.label}</span><span style="font-size:11px;opacity:.7">· ${fmtDate(ph.completed_date)}</span></div>`).join('')}
+        </div>
+        <textarea rows="2" placeholder="Descripción: progreso alcanzado, incidencias, próximos pasos…"
+          onchange="setWeeklyReportNotes('${wr.id}',this.value)"
+          style="font-size:12px;padding:6px 8px;border:1px solid var(--border);border-radius:4px;resize:vertical;color:var(--ink)">${wr.notes||''}</textarea>
+      </div>`).join('')
+    }
+  </div>
 
   <!-- MODAL EDITAR / NUEVA FASE -->
   <div id="gantt-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:150;align-items:center;justify-content:center">
@@ -1902,7 +1937,48 @@ function deleteGanttTask(id){
   const p=getProject();p.schedule=p.schedule.filter(x=>x.id!==id);
   saveProject();renderSchedule();showToast('Fase eliminada');
 }
-function setGanttStatus(id,status){const p=getProject();const t=p.schedule.find(x=>x.id===id);if(t){t.status=status;}saveProject();renderSchedule();if(currentPage==='dashboard')renderDashboard();}
+function setGanttStatus(id,status){
+  const p=getProject();const t=p.schedule.find(x=>x.id===id);if(!t)return;
+  t.status=status;
+  if(status==='completado'){
+    t.completed_date=t.completed_date||new Date().toISOString().split('T')[0];
+    addPhaseToWeeklyReport(t,p);
+  }
+  saveProject();renderSchedule();if(currentPage==='dashboard')renderDashboard();
+  showToast((status==='completado'?'✓ Fase completada: ':'Estado: ')+t.label.slice(0,40),'success',2500);
+}
+function getISOWeek(date){
+  const d=new Date(date||Date.now());d.setHours(0,0,0,0);
+  d.setDate(d.getDate()+3-(d.getDay()+6)%7);
+  const w1=new Date(d.getFullYear(),0,4);
+  return 1+Math.round(((d-w1)/86400000-3+(w1.getDay()+6)%7)/7);
+}
+function getMondayISO(date){
+  const d=new Date(date||Date.now());const day=d.getDay();
+  return new Date(d.getFullYear(),d.getMonth(),d.getDate()-day+(day===0?-6:1)).toISOString().split('T')[0];
+}
+function addPhaseToWeeklyReport(phase,proj){
+  const p=proj||getProject();if(!p.weekly_reports)p.weekly_reports=[];
+  const now=new Date();const wn=getISOWeek(now);const yr=now.getFullYear();
+  const weekKey=yr+'-W'+String(wn).padStart(2,'0');
+  let wr=p.weekly_reports.find(r=>r.week_key===weekKey);
+  if(!wr){wr={id:uid(),week_key:weekKey,week_num:wn,year:yr,week_date:getMondayISO(now),completed_phases:[],notes:''};p.weekly_reports.push(wr);}
+  if(!wr.completed_phases.find(ph=>ph.phase_id===phase.id)){
+    wr.completed_phases.push({phase_id:phase.id,label:phase.label,completed_date:phase.completed_date||new Date().toISOString().split('T')[0]});
+  }
+}
+function setWeeklyReportNotes(id,notes){
+  const p=getProject();const wr=(p.weekly_reports||[]).find(r=>r.id===id);if(!wr)return;
+  wr.notes=notes;saveProject();showToast('Informe guardado','success',1500);
+}
+function addWeeklyReport(){
+  const p=getProject();if(!p.weekly_reports)p.weekly_reports=[];
+  const now=new Date();const wn=getISOWeek(now);const yr=now.getFullYear();
+  const weekKey=yr+'-W'+String(wn).padStart(2,'0');
+  if(p.weekly_reports.find(r=>r.week_key===weekKey)){showToast('Ya existe informe para esta semana','warning');return;}
+  p.weekly_reports.push({id:uid(),week_key:weekKey,week_num:wn,year:yr,week_date:getMondayISO(now),completed_phases:[],notes:''});
+  saveProject();renderSchedule();showToast('Semana añadida','success',2000);
+}
 // ─── CAMBIO 4: Reporte de cronograma para cliente ────────────────────────────
 function showScheduleClientReport(){
   const p=getProject();
@@ -1975,6 +2051,16 @@ function showScheduleClientReport(){
           <span style="font-weight:500;flex:1">${t.label}</span>
           <span style="color:#6B7280">${unitLabel}${t.start+1}</span>
         </div>`).join('')}
+      </div>`:''}
+      <!-- Informes semanales -->
+      ${(p.weekly_reports||[]).length?`<div style="border-top:1px solid #F3F4F6;padding-top:16px;margin-top:4px">
+        <div style="font-size:12px;font-weight:700;color:var(--ink);margin-bottom:10px">📅 Informes Semanales</div>
+        ${(p.weekly_reports||[]).slice().sort((a,b)=>b.week_key.localeCompare(a.week_key)).slice(0,6).map(wr=>`
+          <div style="margin-bottom:12px;padding:10px;background:#F9FAFB;border-radius:8px">
+            <div style="font-weight:600;font-size:12px;margin-bottom:4px;color:#1D4ED8">Semana ${wr.week_num} · ${fmtDate(wr.week_date)}</div>
+            ${wr.completed_phases.map(ph=>`<div style="font-size:11px;color:#374151">✓ ${ph.label}</div>`).join('')}
+            ${wr.notes?`<div style="font-size:12px;color:#6B7280;margin-top:6px;padding-top:6px;border-top:1px solid #E5E7EB">${wr.notes}</div>`:''}
+          </div>`).join('')}
       </div>`:''}
     </div>
     <div style="padding:12px 24px;border-top:1px solid #E5E7EB;display:flex;gap:8px;justify-content:flex-end">
