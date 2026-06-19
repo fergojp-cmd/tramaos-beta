@@ -5033,10 +5033,10 @@ REGLAS IMPORTANTES:
 - Instrucción extra: ${document.getElementById('ia-extra')?.value||'ninguna'}`;
 
   // Si el PDF supera 3.5MB, dividir en páginas con PDF.js
-  const _SPLIT_THRESH=3.5*1024*1024;
+  const _SPLIT_THRESH=2.5*1024*1024;
   const _b64Size=item.b64?Math.round(item.b64.length*0.75):0;
   if(item.type==='application/pdf'&&_b64Size>_SPLIT_THRESH){
-    console.log('[IA-Split]',item.name,'-',Math.round(_b64Size/1024/1024*10)/10+'MB > 3.5MB — activando PDF split');
+    console.log('[IA-Split]',item.name,'-',Math.round(_b64Size/1024/1024*10)/10+'MB > 2.5MB — activando PDF split');
     return await iaBatchSplitAndAnalyze(item,sys);
   }
 
