@@ -293,7 +293,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--slate);box-shadow:0 0
       <hr class="nav-divider">
       <div class="nav-section">Sistema</div>
       <div class="nav-item" data-page="knowledge" onclick="nav(this)"><span class="nav-icon">🧠</span> Knowledge Base</div>
-      <div class="nav-item" data-page="portal-settings" onclick="nav(this)"><span class="nav-icon">🌐</span> Client Portal</div>
+      <div class="nav-item" data-page="portal-settings" onclick="nav(this)"><span class="nav-icon">🌐</span> Client Portal <span class="nav-badge" id="badge-messages" style="display:none;background:#2563EB">0</span></div>
       <div class="nav-item" data-page="admin" onclick="nav(this)" id="nav-admin" style="display:none"><span class="nav-icon">⚙</span> Admin Panel</div>
     </nav>
 
@@ -735,6 +735,20 @@ input:focus,select:focus,textarea:focus{border-color:var(--slate);box-shadow:0 0
     <div class="modal-footer">
       <button class="btn btn-ghost" onclick="closeModal('modal-provider')">Cancelar</button>
       <button class="btn btn-primary" onclick="saveProvider()">Guardar proveedor</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="modal-reply-msg" onclick="if(event.target===this)closeModal('modal-reply-msg')">
+  <div class="modal" style="max-width:560px">
+    <div class="modal-title">✉ Hilo de mensajes <button onclick="closeModal('modal-reply-msg')" style="background:none;border:none;font-size:18px;cursor:pointer;color:var(--muted)">✕</button></div>
+    <div id="reply-thread" style="min-height:80px;max-height:280px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:12px"></div>
+    <div class="form-group"><label class="form-label">Tu respuesta</label><textarea id="reply-body" rows="3" placeholder="Escribe tu respuesta al cliente..." style="font-family:inherit"></textarea></div>
+    <div id="reply-attach-preview" style="display:none;font-size:12px;color:var(--muted);margin-bottom:8px;padding:6px 10px;background:var(--slate-pale);border-radius:6px"></div>
+    <div class="modal-footer">
+      <label style="cursor:pointer;padding:6px 12px;background:var(--slate-pale);border-radius:6px;font-size:12px;color:var(--slate);user-select:none">📎 Adjunto<input type="file" id="reply-attach" style="display:none" accept=".pdf,.jpg,.jpeg,.png" onchange="previewReplyAttachment(this)"></label>
+      <button class="btn btn-ghost" onclick="closeModal('modal-reply-msg')">Cancelar</button>
+      <button class="btn btn-primary" onclick="sendDashboardReply()">Enviar al cliente</button>
     </div>
   </div>
 </div>
@@ -1421,7 +1435,36 @@ function renderDashboard() {
           <button class="btn btn-xs btn-ghost" onclick="nav(document.querySelector('[data-page=decisions]'))">Ver</button>
         </div>`).join('')
       :'<div style="color:var(--muted);font-size:13px;padding:8px 0">Sin decisiones pendientes del cliente</div>'}
-  </div>`;
+  </div>
+
+  ${(()=>{const unread=(p.client_portal?.messages||[]).filter(m=>m.from==='cliente'&&!m.read_at);if(!unread.length)return'';
+  return `<div class="card" style="border-left:3px solid #2563EB">
+    <div class="card-title" style="color:#1D4ED8">✉ Mensajes sin leer del cliente
+      <button class="btn btn-xs" style="background:#EFF6FF;color:#1D4ED8;border:1px solid #BFDBFE" onclick="openClientPortal()">Ver portal</button>
+    </div>
+    ${unread.map(m=>`<div style="display:flex;align-items:flex-start;gap:10px;padding:9px 0;border-bottom:1px solid var(--border2)">
+      <div style="width:30px;height:30px;border-radius:50%;background:#EFF6FF;display:flex;align-items:center;justify-content:center;font-size:13px;flex-shrink:0">✉</div>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:13px;font-weight:600">${p.client?.name||'Cliente'}</div>
+        <div style="font-size:12px;color:var(--muted);margin-top:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${m.body.slice(0,80)}${m.body.length>80?'…':''}</div>
+        <div style="font-size:11px;color:var(--muted);margin-top:1px">${m.sent_at?new Date(m.sent_at).toLocaleString('es-ES',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}):''}</div>
+      </div>
+      <button class="btn btn-sm btn-primary" onclick="openReplyModal('${m.id}')">Responder</button>
+    </div>`).join('')}
+  </div>`})()}
+
+  ${(()=>{const acts=(p.alerts||[]).filter(a=>a.is_client_action&&!a.done).slice(0,5);if(!acts.length)return'';
+  return `<div class="card">
+    <div class="card-title">👤 Actividad del cliente
+      <button class="btn btn-xs btn-ghost" onclick="openClientPortal()">Ver portal</button>
+    </div>
+    ${acts.map(a=>`<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border2)">
+      <span style="font-size:20px">${a.client_action==='approve'?'✅':a.client_action==='debate'?'💬':'✉'}</span>
+      <div style="flex:1;font-size:13px">${a.description}</div>
+      <span style="font-size:11px;color:var(--muted)">${a.date?fmtDate(a.date):''}</span>
+      <button class="btn btn-xs b-green" onclick="toggleAlertDone('${a.id}');if(currentPage==='dashboard')renderDashboard()">✓</button>
+    </div>`).join('')}
+  </div>`})()}`;
 }
 
 function renderDocStatusTable(p) {
@@ -1753,6 +1796,7 @@ function renderSchedule() {
             </span>
             ${wr.completed_phases.length?`<span class="badge b-green" style="font-size:10px">${wr.completed_phases.length} fase(s)</span>`:''}
             ${approvalLabel?`<span style="font-size:11px;color:${approvalColor}">${approvalLabel}</span>`:''}
+            <span style="font-size:10px;color:var(--muted);white-space:nowrap;flex-shrink:0">${wr.created_at?'🗓 '+fmtDate(wr.created_at.split('T')[0]):''}${wr.updated_at?' · ✏ '+new Date(wr.updated_at).toLocaleString('es-ES',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}):''}</span>
             <button onclick="event.stopPropagation();deleteWeeklyReport('${wr.id}')" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:14px;padding:0 4px" title="Eliminar informe">✕</button>
           </div>
           <div style="padding:12px 14px">
@@ -2057,6 +2101,7 @@ function generateWeeklyReports(p){
       week_date:weekDateStr,week_date_end:weekDateEndStr,obra_week_num:i+1,title:'',
       activities:'',photos:[],incidents:'',next_week:'',
       completed_phases:[],notes:'',status:'empty',
+      created_at:new Date().toISOString(),updated_at:null,
       approval_status:'pending',approved_by:null,approved_at:null,debate_comments:[]});
   }
   p.weekly_reports.sort((a,b)=>a.week_key.localeCompare(b.week_key));
@@ -2080,9 +2125,12 @@ function addPhaseToWeeklyReport(phase,proj){
   if(!wr){
     const wdate=getMondayISO(now);
     const obraWk=getObraWeekNum(wdate,p);
-    wr={id:uid(),week_key:weekKey,week_num:wn,year:yr,week_date:wdate,
-      obra_week_num:obraWk,title:'',activities:'',incidents:'',next_week:'',
-      completed_phases:[],notes:'',
+    const wdateEnd=new Date(wdate+'T12:00:00');wdateEnd.setDate(wdateEnd.getDate()+6);
+    wr={id:uid(),week_key:weekKey,week_num:obraWk||wn,year:yr,week_date:wdate,
+      week_date_end:wdateEnd.toISOString().split('T')[0],obra_week_num:obraWk,
+      title:'',activities:'',photos:[],incidents:'',next_week:'',
+      completed_phases:[],notes:'',status:'empty',
+      created_at:new Date().toISOString(),updated_at:null,
       approval_status:'pending',approved_by:null,approved_at:null,debate_comments:[]};
     p.weekly_reports.push(wr);
   }
@@ -2102,10 +2150,13 @@ function addWeeklyReport(){
   if(!title&&p.weekly_reports.find(r=>r.week_key===weekKey)){showToast('Ya existe informe para esta semana','warning');return;}
   const wdate=getMondayISO(now);const obraWk=getObraWeekNum(wdate,p);
   const uid2=uid();
+  const wdateEnd2=new Date(wdate+'T12:00:00');wdateEnd2.setDate(wdateEnd2.getDate()+6);
   p.weekly_reports.push({id:uid2,week_key:title?weekKey+'-c'+uid2.slice(-4):weekKey,
-    week_num:wn,year:yr,week_date:wdate,obra_week_num:obraWk,title:title||'',
-    activities:'',incidents:'',next_week:'',
-    completed_phases:[],notes:'',
+    week_num:obraWk||wn,year:yr,week_date:wdate,week_date_end:wdateEnd2.toISOString().split('T')[0],
+    obra_week_num:obraWk,title:title||'',
+    activities:'',photos:[],incidents:'',next_week:'',
+    completed_phases:[],notes:'',status:'empty',
+    created_at:new Date().toISOString(),updated_at:null,
     approval_status:'pending',approved_by:null,approved_at:null,debate_comments:[]});
   saveProject();renderSchedule();showToast('Informe añadido','success',2000);
 }
@@ -2120,7 +2171,8 @@ function deleteWeeklyReport(id){
 }
 function saveWeeklyReportField(id,field,value){
   const p=getProject();const wr=(p.weekly_reports||[]).find(r=>r.id===id);if(!wr)return;
-  wr[field]=value;saveProject();showToast('Guardado','success',1000);
+  wr[field]=value;wr.updated_at=new Date().toISOString();if(wr.status==='empty')wr.status='draft';
+  saveProject();showToast('Guardado','success',1000);
 }
 // ─── CAMBIO 4: Reporte de cronograma para cliente ────────────────────────────
 function showScheduleClientReport(){
@@ -5088,7 +5140,7 @@ async function iaBatchAnalyzeOne(item){
 Coordinador: ${APP.workspace.owner}${firmName?'. Firma/Oficina: '+firmName:''}. Tipo de proyecto: ${p.meta?.type||'residencial'}.
 Capítulos de presupuesto: ${chaptersContext}.
 Proveedores actuales: ${existingProviders}.
-${firmName?`IMPORTANTE: Si el emisor del documento coincide con "${firmName}" o "${APP.workspace.owner}", clasifícalo como documento propio (no de proveedor externo). proveedor.detectado debe ser false en ese caso.`:''}
+${firmName?`CLASIFICACIÓN POR FIRMANTE (aplica siempre): Si el emisor del documento es "${firmName}" o "${APP.workspace.owner}" → tipo=presupuesto_obra, proveedor.detectado=false (documento propio que nosotros emitimos al cliente). Si el emisor es un tercero externo que nos envía a nosotros ("${firmName}" aparece como receptor/destinatario) → tipo=presupuesto_proveedor o factura, proveedor.detectado=true. NUNCA confundir quién emite con quién recibe.`:''}
 
 Analiza el documento y extrae TODA la información posible. Responde SOLO con JSON válido, sin markdown, sin texto adicional:
 
@@ -6718,14 +6770,14 @@ function renderPortalDocs(p,vis){
           const hasFile=!!d.file_data;
           const ftIcon={pdf:'📄',dwg:'📐',img:'📷',doc:'📋'}[d.file_type]||'📄';
           const sc={aprobado:'pb-green',entregado:'pb-green',emitido:'pb-green',válido:'pb-green',firmado:'pb-green',pendiente:'pb-amber',borrador:'pb-gray'}[d.status]||'pb-gray';
-          return `<div class="portal-doc-item" onclick="${hasFile?'downloadPortalDoc(\''+d.id+'\')':''}">
+          return `<div class="portal-doc-item" onclick="${hasFile?'openPortalDoc(\''+d.id+'\')':''}" style="${hasFile?'cursor:pointer':''}">
             <div style="width:40px;height:40px;border-radius:8px;background:${d.file_type==='pdf'?'#FEE2E2':d.file_type==='dwg'?'#DBEAFE':'#F3F4F6'};display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0">${ftIcon}</div>
             <div style="flex:1">
               <div style="font-size:14px;font-weight:500;color:#111827">${d.name}</div>
               <div style="font-size:12px;color:#9CA3AF;margin-top:2px">v${d.version} · ${fmtDate(d.uploaded_at)}${d.expires_at?' · Vence: '+fmtDate(d.expires_at):''}</div>
             </div>
             <span class="portal-badge ${sc}">${d.status}</span>
-            ${hasFile?'<span style="font-size:20px;color:#9CA3AF">↓</span>':''}
+            ${hasFile?`<span style="font-size:13px;color:#6B7280;background:#F3F4F6;border-radius:6px;padding:4px 8px">${d.file_type==='img'?'👁 Ver':'▶ Abrir'}</span>`:''}
           </div>`;}).join('')}
       </div>`;}).join('')}
   </div>`;
@@ -6738,6 +6790,92 @@ function downloadPortalDoc(id){
   a.href='data:'+d.file_type+';base64,'+d.file_data;
   a.download=d.name+(d.file_type==='pdf'?'.pdf':d.file_type==='img'?'.jpg':'');
   a.click();
+}
+function openPortalDoc(id){
+  const p=getProject();const d=p.documents.find(x=>x.id===id);
+  if(!d||!d.file_data)return;
+  if(d.file_type==='img'){
+    const ov=document.createElement('div');
+    ov.style='position:fixed;inset:0;background:rgba(0,0,0,.9);z-index:2000;display:flex;align-items:center;justify-content:center;cursor:pointer';
+    ov.onclick=()=>ov.remove();
+    ov.innerHTML=`<img src="data:image/jpeg;base64,${d.file_data}" style="max-width:90vw;max-height:90vh;border-radius:8px"><div style="position:absolute;top:16px;right:20px;color:#fff;font-size:24px">✕</div>`;
+    document.body.appendChild(ov);
+  } else {
+    const w=window.open('','_blank');
+    if(w){w.document.write(`<title>${d.name}</title><style>body{margin:0}</style><iframe src="data:application/pdf;base64,${d.file_data}" style="width:100%;height:100vh;border:none"></iframe>`);w.document.close();}
+  }
+}
+function openMsgAttachment(msgId){
+  const p=getProject();
+  const m=(p.client_portal?.messages||[]).find(x=>x.id===msgId);
+  if(!m?.attachment)return;
+  if(m.attachment.type==='image'){
+    const ov=document.createElement('div');
+    ov.style='position:fixed;inset:0;background:rgba(0,0,0,.9);z-index:2000;display:flex;align-items:center;justify-content:center;cursor:pointer';
+    ov.onclick=()=>ov.remove();
+    ov.innerHTML=`<img src="data:image/jpeg;base64,${m.attachment.data}" style="max-width:90vw;max-height:90vh;border-radius:8px">`;
+    document.body.appendChild(ov);
+  } else {
+    const w=window.open('','_blank');
+    if(w){w.document.write(`<title>${m.attachment.name||'Adjunto'}</title><style>body{margin:0}</style><iframe src="data:application/pdf;base64,${m.attachment.data}" style="width:100%;height:100vh;border:none"></iframe>`);w.document.close();}
+  }
+}
+function previewMsgAttachment(input){
+  const file=input.files[0];if(!file)return;
+  if(file.size>4*1024*1024){showToast('Archivo demasiado grande (máx. 4MB)','warning');input.value='';return;}
+  const reader=new FileReader();
+  reader.onload=e=>{
+    const type=file.type.startsWith('image/')?'image':'pdf';
+    _pendingMsgAttachment={data:e.target.result.split(',')[1],type,name:file.name};
+    const prev=document.getElementById('client-msg-attach-preview');
+    if(prev){prev.style.display='block';prev.innerHTML=`📎 ${file.name} (${(file.size/1024).toFixed(0)}KB) <button onclick="_pendingMsgAttachment=null;this.parentElement.style.display='none'" style="background:none;border:none;cursor:pointer;color:var(--red);font-size:12px">✕</button>`;}
+  };
+  reader.readAsDataURL(file);
+}
+function openReplyModal(msgId){
+  const p=getProject();const msgs=p.client_portal?.messages||[];
+  const msg=msgs.find(m=>m.id===msgId);if(!msg)return;
+  const clientName=p.client?.name||'Cliente';
+  if(!msg.read_at){msg.read_at=new Date().toISOString();saveProject();updateBadges();}
+  const thread=msgs.filter(m=>m.thread_id===msg.thread_id||m.id===msgId);
+  const el=document.getElementById('reply-thread');
+  el.innerHTML=thread.map(m=>{
+    const isArch=m.from==='arquitecto';
+    return `<div style="display:flex;flex-direction:column;align-items:${isArch?'flex-start':'flex-end'};margin-bottom:10px">
+      <div style="max-width:80%;background:${isArch?'#F9FAFB':'#1B3A5C'};color:${isArch?'#111':'#fff'};border-radius:8px;padding:8px 12px;font-size:13px">${m.body}${m.attachment?`<div style="margin-top:6px;padding:4px 8px;background:rgba(0,0,0,.1);border-radius:4px;font-size:11px">📎 ${m.attachment.name||'Adjunto'}</div>`:''}</div>
+      <div style="font-size:10px;color:#9CA3AF;margin-top:2px">${isArch?'Tú':clientName} · ${m.sent_at?new Date(m.sent_at).toLocaleString('es-ES',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}):''}</div>
+    </div>`;}).join('');
+  el.setAttribute('data-thread',msg.thread_id);
+  el.scrollTop=el.scrollHeight;
+  document.getElementById('reply-body').value='';
+  document.getElementById('reply-attach-preview').style.display='none';
+  _pendingMsgAttachment=null;
+  if(currentPage==='dashboard')renderDashboard();
+  openModal('modal-reply-msg');
+}
+function previewReplyAttachment(input){
+  const file=input.files[0];if(!file)return;
+  if(file.size>4*1024*1024){showToast('Archivo demasiado grande (máx. 4MB)','warning');input.value='';return;}
+  const reader=new FileReader();
+  reader.onload=e=>{
+    const type=file.type.startsWith('image/')?'image':'pdf';
+    _pendingMsgAttachment={data:e.target.result.split(',')[1],type,name:file.name};
+    const prev=document.getElementById('reply-attach-preview');
+    if(prev){prev.style.display='block';prev.textContent=`📎 ${file.name} (${(file.size/1024).toFixed(0)}KB)`;}
+  };
+  reader.readAsDataURL(file);
+}
+function sendDashboardReply(){
+  const p=getProject();if(!p.client_portal.messages)p.client_portal.messages=[];
+  const body=document.getElementById('reply-body')?.value?.trim();
+  if(!body){showToast('Escribe un mensaje','warning');return;}
+  const threadId=document.getElementById('reply-thread').getAttribute('data-thread')||uid();
+  const attachment=_pendingMsgAttachment||null;
+  p.client_portal.messages.push({id:uid(),subject:'Re: Mensaje',body,from:'arquitecto',sent_at:new Date().toISOString(),read_at:null,thread_id:threadId,attachment});
+  _pendingMsgAttachment=null;
+  saveProject();closeModal('modal-reply-msg');
+  if(currentPage==='dashboard')renderDashboard();
+  showToast('Respuesta enviada al cliente','success');
 }
 
 // ── LOCKED (no visible) ─────────────────────────────
@@ -6762,15 +6900,21 @@ function updatePortalMsgBadge(p){
   const badge=document.getElementById('portal-msg-badge');
   if(badge)badge.style.display=unread?'inline':'none';
 }
+let _pendingMsgAttachment=null;
 function clientSendMessage(){
   const p=getProject();if(!p.client_portal.messages)p.client_portal.messages=[];
   const body=document.getElementById('client-msg-input')?.value?.trim();
   if(!body){showToast('Escribe un mensaje','warning');return;}
   const latestFromArch=p.client_portal.messages.filter(m=>m.from==='arquitecto').slice(-1)[0];
   const threadId=latestFromArch?.thread_id||uid();
-  p.client_portal.messages.push({id:uid(),subject:'Re: '+(latestFromArch?.subject||'Mensaje'),body,from:'cliente',sent_at:new Date().toISOString(),read_at:null,thread_id:threadId});
-  saveProject();
+  const attachment=_pendingMsgAttachment||null;
+  p.client_portal.messages.push({id:uid(),subject:'Re: '+(latestFromArch?.subject||'Mensaje'),body,from:'cliente',sent_at:new Date().toISOString(),read_at:null,thread_id:threadId,attachment});
+  const clientName=p.client?.name||'Cliente';
+  p.alerts.push({id:uid(),type:'Mensaje cliente',description:`${clientName}: "${body.slice(0,60)}${body.length>60?'…':''}"`,priority:'Media',done:false,status:'pendiente',is_client_action:true,client_action:'message',date:TODAY,due_date:TODAY,amount:0});
+  _pendingMsgAttachment=null;
+  saveProject();updateBadges();
   document.getElementById('client-msg-input').value='';
+  const prevEl=document.getElementById('client-msg-attach-preview');if(prevEl)prevEl.style.display='none';
   document.getElementById('portal-content').innerHTML=renderPortalMessages(p,p.client_portal);
   showToast('Mensaje enviado','success',1500);
 }
@@ -6787,6 +6931,10 @@ function renderPortalMessages(p,cp){
               <div style="max-width:75%;background:${isArch?'#F9FAFB':'#1B3A5C'};color:${isArch?'#111827':'#fff'};border-radius:${isArch?'4px 12px 12px 12px':'12px 4px 12px 12px'};padding:10px 14px;box-shadow:0 1px 3px rgba(0,0,0,.08)">
                 <div style="font-size:11px;font-weight:600;margin-bottom:4px;opacity:.7">${m.subject}</div>
                 <div style="font-size:14px;line-height:1.6">${m.body}</div>
+                ${m.attachment?`<div style="margin-top:8px;padding:6px 10px;background:rgba(0,0,0,.08);border-radius:6px;cursor:pointer;display:flex;align-items:center;gap:8px" onclick="openMsgAttachment('${m.id}')">
+                  ${m.attachment.type==='image'?`<img src="data:image/jpeg;base64,${m.attachment.data}" style="width:44px;height:44px;object-fit:cover;border-radius:4px;flex-shrink:0">`:'<span style="font-size:20px">📄</span>'}
+                  <span style="font-size:11px;word-break:break-all">${m.attachment.name||'Adjunto'}</span>
+                </div>`:''}
               </div>
               <div style="font-size:10px;color:#9CA3AF;margin-top:3px;display:flex;align-items:center;gap:4px">
                 ${m.sent_at?new Date(m.sent_at).toLocaleString('es-ES',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}):''}
@@ -6794,10 +6942,12 @@ function renderPortalMessages(p,cp){
               </div>
             </div>`;}).join('')}
       </div>
-      <div style="display:flex;gap:8px">
+      <div style="display:flex;gap:8px;align-items:flex-end">
         <textarea id="client-msg-input" rows="2" placeholder="Escribe tu respuesta..." style="flex:1;font-size:13px;padding:8px 10px;border:1px solid #E5E7EB;border-radius:8px;resize:none;font-family:inherit"></textarea>
-        <button onclick="clientSendMessage()" style="padding:8px 16px;background:#1B3A5C;color:#fff;border:none;border-radius:8px;font-size:13px;cursor:pointer;font-family:inherit;align-self:flex-end">Enviar</button>
+        <label style="cursor:pointer;padding:8px 10px;background:#F3F4F6;border-radius:8px;font-size:13px;color:#374151;flex-shrink:0" title="Adjuntar PDF o imagen (máx. 4MB)">📎<input type="file" id="client-msg-attach" style="display:none" accept=".pdf,.jpg,.jpeg,.png" onchange="previewMsgAttachment(this)"></label>
+        <button onclick="clientSendMessage()" style="padding:8px 16px;background:#1B3A5C;color:#fff;border:none;border-radius:8px;font-size:13px;cursor:pointer;font-family:inherit;flex-shrink:0">Enviar</button>
       </div>
+      <div id="client-msg-attach-preview" style="display:none;font-size:12px;color:#374151;margin-top:6px;padding:6px 10px;background:#F3F4F6;border-radius:6px"></div>
     </div>
   </div>`;
 }
@@ -6806,15 +6956,20 @@ function renderPortalMessages(p,cp){
 function clientApproveReport(id){
   const p=getProject();const wr=(p.weekly_reports||[]).find(r=>r.id===id);if(!wr)return;
   const clientName=p.client?.name||'Cliente';
+  const obraWk=wr.obra_week_num||wr.week_num;
   wr.approval_status='approved';wr.approved_by=clientName;wr.approved_at=TODAY;
-  saveProject();
+  p.alerts.push({id:uid(),type:'Aprobación cliente',description:`${clientName} aprobó el Informe Semana ${obraWk} de obra`,priority:'Media',done:false,status:'pendiente',is_client_action:true,client_action:'approve',date:TODAY,due_date:TODAY,amount:0});
+  saveProject();updateBadges();
   document.getElementById('portal-content').innerHTML=renderPortalInformes(p,p.client_portal?.visibility||{});
   showToast('Informe aprobado','success',2000);
 }
 function clientDebateReport(id){
   const p=getProject();const wr=(p.weekly_reports||[]).find(r=>r.id===id);if(!wr)return;
+  const clientName=p.client?.name||'Cliente';
+  const obraWk=wr.obra_week_num||wr.week_num;
   wr.approval_status='in_debate';if(!wr.debate_comments)wr.debate_comments=[];
-  saveProject();
+  p.alerts.push({id:uid(),type:'Debate informe',description:`${clientName} debatió el Informe Semana ${obraWk} de obra`,priority:'Media',done:false,status:'pendiente',is_client_action:true,client_action:'debate',date:TODAY,due_date:TODAY,amount:0});
+  saveProject();updateBadges();
   document.getElementById('portal-content').innerHTML=renderPortalInformes(p,p.client_portal?.visibility||{});
 }
 function clientAddDebateComment(id){
@@ -7481,6 +7636,9 @@ function updateBadges(){
   document.getElementById('badge-tasks').textContent=p.tasks.filter(t=>t.status!=='completada').length;
   document.getElementById('badge-alerts').textContent=p.alerts.filter(a=>!a.done).length;
   document.getElementById('badge-payments').textContent=p.payments.filter(x=>x.status==='pendiente').length;
+  const unreadMsgs=(p.client_portal?.messages||[]).filter(m=>m.from==='cliente'&&!m.read_at).length;
+  const msgBadge=document.getElementById('badge-messages');
+  if(msgBadge){msgBadge.style.display=unreadMsgs?'inline':'none';msgBadge.textContent=unreadMsgs;}
 }
 function updateTopProgress(){
   const p=getProject();const pct=p?.progress||0;
