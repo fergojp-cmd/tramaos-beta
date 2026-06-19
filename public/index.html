@@ -1789,10 +1789,10 @@ function renderSchedule() {
         const range=wr.week_date?fmtObraWeekRange(wr.week_date):'';
         const headerTitle=wr.title||`Semana ${obraWk} de obra`;
         const approvalColor={pending:'var(--muted)',approved:'var(--green)',in_debate:'#D97706'}[wr.approval_status||'pending'];
-        const approvalLabel={pending:'',approved:`✓ Aprobado por ${wr.approved_by||'cliente'} · ${fmtDate(wr.approved_at)}`,in_debate:'💬 En debate'}[wr.approval_status||'pending'];
+        const approvalLabel={pending:'',approved:`<span style="background:#DCFCE7;color:#15803D;border-radius:12px;padding:2px 8px;font-size:11px">✓ Aprobado · ${fmtDate(wr.approved_at)}</span>`,in_debate:`<span style="background:#FEF3C7;color:#92400E;border-radius:12px;padding:2px 8px;font-size:11px">💬 En debate</span>`}[wr.approval_status||'pending'];
         return `<div style="border:1px solid var(--border);border-radius:8px;margin-bottom:10px;overflow:hidden">
           <div style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:#F9FAFB;cursor:pointer" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'block':'none'">
-            <span style="font-weight:700;font-size:13px;flex:1">${headerTitle}${range?` <span style='font-weight:400;font-size:11px;color:var(--muted)'>— ${range}</span>`:''}
+            <span style="font-weight:700;font-size:13px;flex:1">${range||headerTitle}${range?` <span style='font-weight:400;font-size:11px;color:var(--muted)'>· ${headerTitle}</span>`:''}
             </span>
             ${wr.completed_phases.length?`<span class="badge b-green" style="font-size:10px">${wr.completed_phases.length} fase(s)</span>`:''}
             ${approvalLabel?`<span style="font-size:11px;color:${approvalColor}">${approvalLabel}</span>`:''}
@@ -1824,6 +1824,14 @@ function renderSchedule() {
             <textarea rows="2" placeholder="Notas adicionales…"
               onchange="saveWeeklyReportField('${wr.id}','notes',this.value)"
               style="width:100%;font-size:12px;padding:6px 8px;border:1px solid var(--border);border-radius:4px;resize:vertical;color:var(--ink);font-family:inherit">${wr.notes||''}</textarea>
+            ${wr.approval_status==='in_debate'?`<div style="margin-top:10px;padding:10px 12px;background:#FFFBEB;border-radius:6px;border-left:3px solid #D97706">
+              <div style="font-size:11px;font-weight:700;color:#92400E;margin-bottom:6px">💬 DUDAS DEL CLIENTE</div>
+              ${(wr.debate_comments||[]).map(c=>`<div style="font-size:12px;padding:4px 0;color:${c.from==='cliente'?'#92400E':'var(--slate)'}">${c.from==='cliente'?'👤 Cliente':'👤 Tú'}: ${c.text}</div>`).join('')}
+              <div style="display:flex;gap:6px;margin-top:8px">
+                <input id="arch-debate-${wr.id}" placeholder="Responder al cliente..." style="flex:1;font-size:12px;padding:5px 8px;border:1px solid var(--border);border-radius:4px;font-family:inherit">
+                <button onclick="saveWeeklyDebateReply('${wr.id}')" class="btn btn-xs btn-primary">Responder</button>
+              </div>
+            </div>`:''}
           </div>
         </div>`;}).join('')
     }
@@ -2079,9 +2087,9 @@ function getObraWeekNum(weekDateStr,p){
 function fmtObraWeekRange(weekDateStr){
   const mon=new Date(weekDateStr+'T12:00:00');
   const sun=new Date(mon);sun.setDate(sun.getDate()+6);
-  const s1=mon.toLocaleDateString('es-ES',{day:'numeric',month:'short'});
-  const s2=sun.toLocaleDateString('es-ES',{day:'numeric',month:'short',year:'numeric'});
-  return s1+' al '+s2;
+  const fmt=d=>d.toLocaleDateString('es-ES',{day:'numeric',month:'long'});
+  const yr=sun.getFullYear();
+  return `${fmt(mon)} al ${fmt(sun)} ${yr}`;
 }
 // Generate weekly report templates for entire project duration
 function generateWeeklyReports(p){
@@ -2160,6 +2168,14 @@ function addWeeklyReport(){
     approval_status:'pending',approved_by:null,approved_at:null,debate_comments:[]});
   saveProject();renderSchedule();showToast('Informe añadido','success',2000);
 }
+function saveWeeklyDebateReply(id){
+  const p=getProject();const wr=(p.weekly_reports||[]).find(r=>r.id===id);if(!wr)return;
+  const text=document.getElementById('arch-debate-'+id)?.value?.trim();
+  if(!text){showToast('Escribe tu respuesta','warning');return;}
+  if(!wr.debate_comments)wr.debate_comments=[];
+  wr.debate_comments.push({id:uid(),from:'equipo',text,date:new Date().toISOString()});
+  saveProject();renderSchedule();showToast('Respuesta enviada al cliente','success');
+}
 function deleteWeeklyReport(id){
   const p=getProject();
   const wr=(p.weekly_reports||[]).find(r=>r.id===id);
@@ -2171,8 +2187,11 @@ function deleteWeeklyReport(id){
 }
 function saveWeeklyReportField(id,field,value){
   const p=getProject();const wr=(p.weekly_reports||[]).find(r=>r.id===id);if(!wr)return;
+  const wasApproved=wr.approval_status==='approved';
   wr[field]=value;wr.updated_at=new Date().toISOString();if(wr.status==='empty')wr.status='draft';
-  saveProject();showToast('Guardado','success',1000);
+  if(wasApproved){wr.approval_status='pending';wr.approved_by=null;wr.approved_at=null;showToast('Informe editado — el cliente deberá volver a aprobar','warning',3000);}
+  else showToast('Guardado','success',1000);
+  saveProject();
 }
 // ─── CAMBIO 4: Reporte de cronograma para cliente ────────────────────────────
 function showScheduleClientReport(){
@@ -6801,8 +6820,16 @@ function openPortalDoc(id){
     ov.innerHTML=`<img src="data:image/jpeg;base64,${d.file_data}" style="max-width:90vw;max-height:90vh;border-radius:8px"><div style="position:absolute;top:16px;right:20px;color:#fff;font-size:24px">✕</div>`;
     document.body.appendChild(ov);
   } else {
-    const w=window.open('','_blank');
-    if(w){w.document.write(`<title>${d.name}</title><style>body{margin:0}</style><iframe src="data:application/pdf;base64,${d.file_data}" style="width:100%;height:100vh;border:none"></iframe>`);w.document.close();}
+    try {
+      const bytes=atob(d.file_data);const arr=new Uint8Array(bytes.length);
+      for(let i=0;i<bytes.length;i++)arr[i]=bytes.charCodeAt(i);
+      const blob=new Blob([arr],{type:'application/pdf'});
+      const url=URL.createObjectURL(blob);
+      const w=window.open(url,'_blank');
+      if(w)setTimeout(()=>URL.revokeObjectURL(url),60000);
+    } catch(e){
+      const a=document.createElement('a');a.href='data:application/pdf;base64,'+d.file_data;a.download=d.name+'.pdf';a.click();
+    }
   }
 }
 function openMsgAttachment(msgId){
@@ -6972,6 +6999,24 @@ function clientDebateReport(id){
   saveProject();updateBadges();
   document.getElementById('portal-content').innerHTML=renderPortalInformes(p,p.client_portal?.visibility||{});
 }
+function showPortalDebateForm(id){
+  const el=document.getElementById('portal-debate-form-'+id);
+  if(el){el.style.display=el.style.display==='none'?'block':'none';}
+}
+function submitClientDebate(id){
+  const p=getProject();const wr=(p.weekly_reports||[]).find(r=>r.id===id);if(!wr)return;
+  const text=document.getElementById('debate-input-'+id)?.value?.trim();
+  if(!text){showToast('Escribe tu duda antes de enviar','warning');return;}
+  if(!wr.debate_comments)wr.debate_comments=[];
+  wr.debate_comments.push({id:uid(),from:'cliente',text,date:new Date().toISOString()});
+  const clientName=p.client?.name||'Cliente';
+  const obraWk=wr.obra_week_num||wr.week_num;
+  wr.approval_status='in_debate';
+  p.alerts.push({id:uid(),type:'Debate informe',description:`${clientName}: "${text.slice(0,60)}${text.length>60?'…':''}"`,priority:'Alta',done:false,status:'pendiente',is_client_action:true,client_action:'debate',date:TODAY,due_date:TODAY,amount:0});
+  saveProject();updateBadges();
+  document.getElementById('portal-content').innerHTML=renderPortalInformes(p,p.client_portal?.visibility||{});
+  showToast('Duda enviada al equipo','success');
+}
 function clientAddDebateComment(id){
   const p=getProject();const wr=(p.weekly_reports||[]).find(r=>r.id===id);if(!wr)return;
   const text=document.getElementById('debate-input-'+id)?.value?.trim();
@@ -6992,12 +7037,17 @@ function renderPortalInformes(p,vis){
       const range=wr.week_date?fmtObraWeekRange(wr.week_date):'';
       const headerTitle=wr.title||`Semana ${obraWk} de obra`;
       const apStatus=wr.approval_status||'pending';
-      const apBadge={pending:'',approved:`<span style="background:#DCFCE7;color:#15803D;border-radius:20px;padding:4px 12px;font-size:12px;font-weight:600">✓ Aprobado por ${wr.approved_by||'cliente'} · ${fmtDate(wr.approved_at)}</span>`,in_debate:`<span style="background:#FFFBEB;color:#92400E;border-radius:20px;padding:4px 12px;font-size:12px;font-weight:600">💬 En debate</span>`}[apStatus];
-      return `<div class="portal-card" style="margin-bottom:16px">
+      const apBadge=apStatus==='approved'
+        ?`<span style="background:#DCFCE7;color:#15803D;border-radius:20px;padding:5px 14px;font-size:12px;font-weight:700;white-space:nowrap">✓ Aprobado por ${wr.approved_by||'cliente'} · ${fmtDate(wr.approved_at)}</span>`
+        :apStatus==='in_debate'
+        ?`<span style="background:#FEF3C7;color:#92400E;border-radius:20px;padding:5px 14px;font-size:12px;font-weight:700;white-space:nowrap">💬 En debate</span>`
+        :'';
+      const editedNote=wr.updated_at?`<div style="font-size:11px;color:#9CA3AF;margin-top:4px">✏ Última edición: ${new Date(wr.updated_at).toLocaleString('es-ES',{day:'numeric',month:'long',hour:'2-digit',minute:'2-digit'})}</div>`:'';
+      return `<div class="portal-card" style="margin-bottom:16px;${apStatus==='approved'?'border-left:3px solid #16A34A':apStatus==='in_debate'?'border-left:3px solid #D97706':''}">
         <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:8px">
           <div>
-            <div style="font-size:15px;font-weight:700;color:#111827">${headerTitle}</div>
-            ${range?`<div style="font-size:12px;color:#6B7280;margin-top:2px">${range}</div>`:''}
+            <div style="font-size:15px;font-weight:700;color:#111827">${range||headerTitle}${range?` <span style="font-size:12px;color:#6B7280;font-weight:400">· ${headerTitle}</span>`:''}</div>
+            ${editedNote}
           </div>
           ${apBadge}
         </div>
@@ -7005,21 +7055,27 @@ function renderPortalInformes(p,vis){
         ${wr.activities?`<div style="margin-bottom:12px"><div style="font-size:11px;font-weight:700;color:#6B7280;text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px">Actividades realizadas</div><div style="font-size:14px;color:#374151;line-height:1.7">${wr.activities}</div></div>`:''}
         ${wr.incidents?`<div style="margin-bottom:12px;background:#FFFBEB;border-radius:8px;padding:10px 14px"><div style="font-size:11px;font-weight:700;color:#92400E;text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px">⚠ Incidencias</div><div style="font-size:14px;color:#374151;line-height:1.7">${wr.incidents}</div></div>`:''}
         ${wr.next_week?`<div style="margin-bottom:12px"><div style="font-size:11px;font-weight:700;color:#6B7280;text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px">Próxima semana</div><div style="font-size:14px;color:#374151;line-height:1.7">${wr.next_week}</div></div>`:''}
-        ${wr.notes?`<div style="font-size:13px;color:#6B7280;font-style:italic">${wr.notes}</div>`:''}
+        ${wr.notes?`<div style="font-size:13px;color:#6B7280;font-style:italic;margin-bottom:10px">${wr.notes}</div>`:''}
         ${apStatus==='in_debate'?`<div style="margin-top:12px;padding-top:12px;border-top:1px solid #F3F4F6">
-          <div style="font-size:12px;font-weight:600;color:#92400E;margin-bottom:8px">💬 Debate</div>
-          ${(wr.debate_comments||[]).map(c=>`<div style="margin-bottom:8px;display:flex;flex-direction:column;align-items:${c.from==='cliente'?'flex-end':'flex-start'}"><div style="background:${c.from==='cliente'?'#1B3A5C':'#F3F4F6'};color:${c.from==='cliente'?'#fff':'#374151'};border-radius:8px;padding:8px 12px;font-size:13px;max-width:80%">${c.text}</div><div style="font-size:10px;color:#9CA3AF;margin-top:2px">${c.from==='cliente'?'Tú':'Equipo'} · ${c.date?new Date(c.date).toLocaleDateString('es-ES',{day:'numeric',month:'short'}):''}</div></div>`).join('')}
+          <div style="font-size:12px;font-weight:700;color:#92400E;margin-bottom:10px">💬 Hilo de dudas</div>
+          ${(wr.debate_comments||[]).map(c=>`<div style="margin-bottom:10px;display:flex;flex-direction:column;align-items:${c.from==='cliente'?'flex-end':'flex-start'}">
+            <div style="background:${c.from==='cliente'?'#1B3A5C':'#F3F4F6'};color:${c.from==='cliente'?'#fff':'#374151'};border-radius:8px;padding:8px 12px;font-size:13px;max-width:82%;line-height:1.5">${c.text}</div>
+            <div style="font-size:10px;color:#9CA3AF;margin-top:3px">${c.from==='cliente'?'Tú':'Equipo de arquitectura'} · ${c.date?new Date(c.date).toLocaleDateString('es-ES',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}):''}</div>
+          </div>`).join('')}
           <div style="display:flex;gap:8px;margin-top:8px">
-            <input id="debate-input-${wr.id}" placeholder="Escribe un comentario..." style="flex:1;padding:6px 10px;border:1px solid #E5E7EB;border-radius:6px;font-size:13px;font-family:inherit">
-            <button onclick="clientAddDebateComment('${wr.id}')" style="padding:6px 14px;background:#1B3A5C;color:#fff;border:none;border-radius:6px;font-size:13px;cursor:pointer;font-family:inherit">Enviar</button>
+            <input id="debate-input-${wr.id}" placeholder="Añadir comentario..." style="flex:1;padding:8px 10px;border:1px solid #E5E7EB;border-radius:8px;font-size:13px;font-family:inherit">
+            <button onclick="clientAddDebateComment('${wr.id}')" style="padding:8px 16px;background:#1B3A5C;color:#fff;border:none;border-radius:8px;font-size:13px;cursor:pointer;font-family:inherit">Enviar</button>
           </div>
+          <button onclick="clientApproveReport('${wr.id}')" style="width:100%;margin-top:10px;padding:9px;background:#DCFCE7;color:#15803D;border:1px solid #BBF7D0;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit">✓ Duda resuelta — Aprobar informe</button>
         </div>`:''}
         ${apStatus==='pending'?`<div style="display:flex;gap:8px;margin-top:12px;padding-top:12px;border-top:1px solid #F3F4F6">
-          <button onclick="clientApproveReport('${wr.id}')" style="flex:1;padding:8px;background:#DCFCE7;color:#15803D;border:1px solid #BBF7D0;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit">✓ Aprobar informe</button>
-          <button onclick="clientDebateReport('${wr.id}')" style="flex:1;padding:8px;background:#FFFBEB;color:#92400E;border:1px solid #FDE68A;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit">💬 Debatir</button>
-        </div>`:apStatus==='approved'?'':`<div style="display:flex;gap:8px;margin-top:12px;padding-top:12px;border-top:1px solid #F3F4F6">
-          <button onclick="clientApproveReport('${wr.id}')" style="flex:1;padding:8px;background:#DCFCE7;color:#15803D;border:1px solid #BBF7D0;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit">✓ Aprobar informe</button>
-        </div>`}
+          <button onclick="clientApproveReport('${wr.id}')" style="flex:1;padding:10px;background:#16A34A;color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;font-family:inherit">✓ Aprobar informe</button>
+          <button onclick="showPortalDebateForm('${wr.id}')" style="flex:1;padding:10px;background:#FFFBEB;color:#92400E;border:1px solid #FDE68A;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;font-family:inherit">💬 Tengo dudas</button>
+        </div>
+        <div id="portal-debate-form-${wr.id}" style="display:none;margin-top:10px">
+          <textarea id="debate-input-${wr.id}" rows="3" placeholder="Escribe aquí tu duda sobre este informe..." style="width:100%;padding:8px 10px;border:1px solid #FDE68A;border-radius:8px;font-size:13px;font-family:inherit;resize:vertical;box-sizing:border-box"></textarea>
+          <button onclick="submitClientDebate('${wr.id}')" style="width:100%;margin-top:6px;padding:9px;background:#D97706;color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit">Enviar duda al equipo</button>
+        </div>`:apStatus==='approved'?`<div style="margin-top:12px;padding-top:12px;border-top:1px solid #F3F4F6;text-align:center;font-size:13px;color:#16A34A;font-weight:600">✓ Informe aprobado — sin más acciones pendientes</div>`:''}
       </div>`;}).join('')}
   </div>`;
 }
