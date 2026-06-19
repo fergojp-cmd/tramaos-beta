@@ -827,7 +827,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--slate);box-shadow:0 0
         </select>
       </div>
       <div><label class="form-label">Semana de obra</label>
-        <input type="week" id="photo-week" title="Semana en que se tomaron las fotos">
+        <input type="week" id="photo-week" title="Semana en que se tomaron las fotos" onchange="updatePhotoWeekHint(this.value)">
         <div id="photo-week-hint" style="font-size:11px;color:var(--muted);margin-top:3px"></div>
       </div>
     </div>
@@ -1736,6 +1736,7 @@ function renderSchedule() {
       <div style="display:flex;gap:8px;align-items:center">
         <span style="font-size:12px;font-weight:400;color:var(--muted)">${(p.weekly_reports||[]).length} informe(s)</span>
         <button onclick="addWeeklyReport()" class="btn btn-ghost btn-sm">+ Informe</button>
+        <button onclick="syncWeeklyReports(getProject());saveProject();renderSchedule()" class="btn btn-ghost btn-sm" title="Recalcula informes según duración del proyecto">↺ Regenerar</button>
         ${!p.meta?.start_date?'<span style="font-size:11px;color:var(--amber)">⚠ Define fecha de inicio en el proyecto para semanas de obra</span>':''}
       </div>
     </div>
@@ -2006,6 +2007,23 @@ function getDateFromISOWeek(year,week){
   d.setDate(d.getDate()-(d.getDay()||7)+1+(week-1)*7);
   return d.toISOString().split('T')[0];
 }
+// Convert ISO week string "YYYY-W##" to "Semana X de obra"
+function obraWeekLabel(isoWeekStr,p){
+  if(!isoWeekStr||!p?.meta?.start_date)return isoWeekStr||'';
+  const parts=isoWeekStr.split('-W');if(parts.length!==2)return isoWeekStr;
+  const wdate=getDateFromISOWeek(parseInt(parts[0]),parseInt(parts[1]));
+  const n=getObraWeekNum(wdate,p);
+  return n?`Semana ${n} de obra`:isoWeekStr;
+}
+function updatePhotoWeekHint(val){
+  if(!val)return;
+  const p=getProject();if(!p?.meta?.start_date)return;
+  const parts=val.split('-W');if(parts.length!==2)return;
+  const wdate=getDateFromISOWeek(parseInt(parts[0]),parseInt(parts[1]));
+  const n=getObraWeekNum(wdate,p);
+  const el=document.getElementById('photo-week-hint');
+  if(el)el.textContent=n?`Semana ${n} de obra`:'';
+}
 // Obra week number: week 1 = week that contains project start_date
 function getObraWeekNum(weekDateStr,p){
   if(!p?.meta?.start_date)return null;
@@ -2033,13 +2051,26 @@ function generateWeeklyReports(p){
     const isoWk=getISOWeek(weekMon);const isoYr=weekMon.getFullYear();
     const weekKey=isoYr+'-W'+String(isoWk).padStart(2,'0');
     if(p.weekly_reports.find(r=>r.week_key===weekKey))continue;
-    p.weekly_reports.push({id:uid(),week_key:weekKey,week_num:isoWk,year:isoYr,
-      week_date:weekDateStr,obra_week_num:i+1,title:'',
-      activities:'',incidents:'',next_week:'',
-      completed_phases:[],notes:'',
+    const weekEndDate=new Date(weekMon);weekEndDate.setDate(weekEndDate.getDate()+6);
+    const weekDateEndStr=weekEndDate.toISOString().split('T')[0];
+    p.weekly_reports.push({id:uid(),week_key:weekKey,week_num:i+1,year:isoYr,
+      week_date:weekDateStr,week_date_end:weekDateEndStr,obra_week_num:i+1,title:'',
+      activities:'',photos:[],incidents:'',next_week:'',
+      completed_phases:[],notes:'',status:'empty',
       approval_status:'pending',approved_by:null,approved_at:null,debate_comments:[]});
   }
   p.weekly_reports.sort((a,b)=>a.week_key.localeCompare(b.week_key));
+}
+function syncWeeklyReports(p){
+  generateWeeklyReports(p);
+  if(!p.meta?.start_date)return;
+  const totalWeeks=(p.meta.pre_weeks||1)+(p.meta.obra_weeks||12)+(p.meta.post_weeks||1);
+  p.weekly_reports=p.weekly_reports.filter(wr=>{
+    if((wr.obra_week_num||0)>totalWeeks){
+      return !!(wr.activities||wr.incidents||wr.next_week||wr.notes||wr.completed_phases?.length);
+    }
+    return true;
+  });
 }
 function addPhaseToWeeklyReport(phase,proj){
   const p=proj||getProject();if(!p.weekly_reports)p.weekly_reports=[];
@@ -4103,6 +4134,8 @@ function renderPhotos(){
   const activeTab=window._photoTab||'galeria';
   const phases=[...new Set(p.photos.map(ph=>ph.phase||'Sin fase'))].sort();
   const weeks=[...new Set(p.photos.map(ph=>ph.week||ph.date?.slice(0,7)||'').filter(Boolean))].sort().reverse();
+  const weekObraMap={};
+  p.photos.forEach(ph=>{if(ph.week&&ph.obra_week_num&&!weekObraMap[ph.week])weekObraMap[ph.week]=ph.obra_week_num;});
   const activePh=window._photoPhase||'todas';
   const activeWk=window._photoWeek||'todas';
 
@@ -4129,7 +4162,7 @@ function renderPhotos(){
     ${phases.map(ph=>`<button class="btn btn-xs ${activePh===ph?'btn-primary':'btn-ghost'}" onclick="window._photoPhase='${ph}';renderPhotos()">${ph}</button>`).join('')}
     ${weeks.length?`<span style="font-size:12px;color:var(--muted);margin-left:8px">Semana:</span>
     <button class="btn btn-xs ${activeWk==='todas'?'btn-primary':'btn-ghost'}" onclick="window._photoWeek='todas';renderPhotos()">Todas</button>
-    ${weeks.map(w=>`<button class="btn btn-xs ${activeWk===w?'btn-primary':'btn-ghost'}" onclick="window._photoWeek='${w}';renderPhotos()">${w}</button>`).join('')}`:''}
+    ${weeks.map(w=>`<button class="btn btn-xs ${activeWk===w?'btn-primary':'btn-ghost'}" onclick="window._photoWeek='${w}';renderPhotos()">${weekObraMap[w]?'S.'+weekObraMap[w]+' obra':w}</button>`).join('')}`:''}
   </div>
   <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px">
     ${filtered.map(ph=>`
@@ -4141,7 +4174,7 @@ function renderPhotos(){
         </div>
         <div style="padding:8px 10px">
           <div style="font-size:12px;font-weight:500;color:var(--ink)">${ph.phase||'Sin fase'}</div>
-          <div style="font-size:11px;color:var(--muted);margin-top:1px">${ph.week?'Sem. '+ph.week:fmtDate(ph.date)} ${ph.desc?'· '+ph.desc.slice(0,25):''}</div>
+          <div style="font-size:11px;color:var(--muted);margin-top:1px">${ph.obra_week_num?'S.'+ph.obra_week_num+' obra':ph.week||fmtDate(ph.date)} ${ph.desc?'· '+ph.desc.slice(0,25):''}</div>
           <div style="display:flex;gap:4px;margin-top:6px">
             <button class="btn btn-xs btn-ghost" onclick="togglePhotoClient('${ph.id}')">${ph.visible_client?'🔒 Ocultar':'🌐 Cliente'}</button>
             <button class="btn btn-xs btn-ghost" onclick="deletePhoto('${ph.id}')">✕</button>
@@ -4158,7 +4191,7 @@ function renderPhotos(){
       const linkedReport=p.reports.find(r=>r.week===wk);
       return `<div class="card">
         <div class="card-title">
-          Semana ${wk}
+          ${weekObraMap[wk]?'Semana '+weekObraMap[wk]+' de obra':wk}
           <div style="display:flex;gap:8px;align-items:center">
             ${linkedReport?`<span class="badge b-green">📋 Vinculada a informe</span>`:'<span class="badge b-gray">Sin informe</span>'}
             <button class="btn btn-xs btn-primary" onclick="exportWeekReportPDF('${wk}')">↓ PDF semana</button>
@@ -4281,7 +4314,7 @@ function openPhotoViewer(id){
   repSel.innerHTML='<option value="">Sin vincular</option>';
   p.reports.forEach(r=>{
     const opt=document.createElement('option');
-    opt.value=r.id;opt.textContent='Semana '+r.week+' · '+r.progress_real+'%';
+    opt.value=r.id;opt.textContent=obraWeekLabel(r.week,p)+' · '+r.progress_real+'%';
     if(r.id===ph.report_id)opt.selected=true;
     repSel.appendChild(opt);
   });
@@ -4372,7 +4405,7 @@ function openPhotoModal(presetReportId){
   p.reports.forEach(r=>{
     const opt=document.createElement('option');
     opt.value=r.id;
-    opt.textContent='Semana '+r.week+' — Avance '+r.progress_real+'%';
+    opt.textContent=obraWeekLabel(r.week,p)+' — Avance '+r.progress_real+'%';
     if(r.id===presetReportId)opt.selected=true;
     sel.appendChild(opt);
   });
@@ -4518,7 +4551,7 @@ function generateReportPDF(p,report,photos,week){
   <!-- TÍTULO -->
   <div class="title-block">
     <div>
-      <div class="title-week">Informe Semanal — Semana ${week}</div>
+      <div class="title-week">Informe Semanal — ${obraWeekLabel(week,p)}</div>
       <div class="title-sub">${p.meta?.type||'Proyecto'} · ${p.meta?.location||p.meta?.city||''}</div>
     </div>
     <div class="progress-chip">${report?.progress_real||0}% completado</div>
@@ -4614,7 +4647,7 @@ function renderReports(){
       return `<div class="card">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
           <div>
-            <div style="font-weight:600;font-size:14px">Semana ${r.week}
+            <div style="font-weight:600;font-size:14px">${obraWeekLabel(r.week,p)}
               <span class="badge b-slate" style="margin-left:6px">Avance: ${r.progress_real}%</span>
               ${linkedPhotos.length?`<span class="badge b-blue" style="margin-left:4px">📷 ${linkedPhotos.length} foto(s)</span>`:''}
             </div>
@@ -6987,7 +7020,7 @@ function createProject(){
       post_weeks:postWeeks
     },
     status:document.getElementById('np-status').value,
-    tasks:[],weekly_todo:{week:'',items:[],notes:'',generated_by_ia:false},
+    tasks:[],weekly_reports:[],weekly_todo:{week:'',items:[],notes:'',generated_by_ia:false},
     schedule:[],milestones:[],documents:[],providers:[],
     budget:[],payments:[],decisions:[],changes:[],
     contracts:[],reports:[],photos:[],alerts:[],
@@ -7001,7 +7034,7 @@ function createProject(){
     newP.notes_internal.push({id:uid(),title:'Brief inicial',content:document.getElementById('np-notes').value,tag:'general',date:TODAY});
   }
   generateDefaultSchedule(newP,obraWeeks,preWeeks,postWeeks);
-  generateWeeklyReports(newP);
+  syncWeeklyReports(newP);
   APP.projects[id]=newP;APP.workspace.activeProjectId=id;saveState();
   closeModal('modal-new-project');populateSelector();switchProject(id);wizardNext(1);
   showToast(`Proyecto "${name}" creado · ${newP.schedule.length} fases generadas automáticamente`,'success',4000);
