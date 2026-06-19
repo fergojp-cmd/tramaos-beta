@@ -408,6 +408,8 @@ input:focus,select:focus,textarea:focus{border-color:var(--slate);box-shadow:0 0
         <button class="ptab" data-ptab="decisions" onclick="switchPortalTab(this,'decisions')">⚡ Decisiones</button>
         <button class="ptab" data-ptab="payments" onclick="switchPortalTab(this,'payments')">💳 Pagos</button>
         <button class="ptab" data-ptab="docs" onclick="switchPortalTab(this,'docs')">📁 Documentos</button>
+        <button class="ptab" data-ptab="informes" onclick="switchPortalTab(this,'informes')">📅 Informes</button>
+        <button class="ptab" data-ptab="messages" onclick="switchPortalTab(this,'messages')" id="ptab-messages">💬 Mensajes<span id="portal-msg-badge" style="display:none;background:#DC2626;color:#fff;border-radius:10px;padding:0 5px;font-size:10px;margin-left:4px">!</span></button>
       </div>
       <button onclick="closePortal()" style="background:none;border:1px solid #E5E7EB;color:#6B7280;padding:6px 12px;border-radius:6px;font-size:12px;cursor:pointer;font-family:inherit">✕ Salir</button>
     </div>
@@ -785,6 +787,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--slate);box-shadow:0 0
 <div class="modal-overlay" id="modal-settings" onclick="if(event.target===this)closeModal('modal-settings')">
   <div class="modal">
     <div class="modal-title">Configuración TramaOS <button onclick="closeModal('modal-settings')" style="background:none;border:none;font-size:18px;cursor:pointer;color:var(--muted)">✕</button></div>
+    <div class="form-group"><label class="form-label">Nombre de la firma / oficina</label><input id="cfg-office-name" placeholder="Ej: Fergo Studio"><div style="font-size:11px;color:var(--muted);margin-top:3px">Se muestra en el topbar, informes y portal cliente</div></div>
     <div class="form-group"><label class="form-label">Nombre del workspace</label><input id="cfg-workspace" placeholder="Mi Estudio de Arquitectura"></div>
     <div style="background:var(--green-bg);border-radius:var(--r);padding:10px;font-size:12px;color:#15803D;margin-bottom:8px">
       ✦ IA activa — El copiloto y la importación de documentos funcionan automáticamente.
@@ -825,6 +828,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--slate);box-shadow:0 0
       </div>
       <div><label class="form-label">Semana de obra</label>
         <input type="week" id="photo-week" title="Semana en que se tomaron las fotos">
+        <div id="photo-week-hint" style="font-size:11px;color:var(--muted);margin-top:3px"></div>
       </div>
     </div>
     <div class="form-row">
@@ -970,7 +974,7 @@ const DEFAULT_PROJECT = {
   client_portal: {
     enabled:false,slug:'proyecto-ejemplo',access_token:'tok_sao_roque',
     visibility:{show_progress:true,show_reports:true,show_photos:true,show_payments:false,show_contracts:false,show_plans:true,show_decisions:true},
-    published_updates:[],client_comments:[],client_approvals:[]
+    published_updates:[],client_comments:[],client_approvals:[],messages:[]
   },
   progress: 0,
   created_at:'2025-07-01',updated_at:TODAY
@@ -1012,7 +1016,7 @@ const DEFAULT_KB = {
 
 const DEFAULT_STATE = {
   version:'1.0.0',
-  workspace:{name:'Mi Estudio de Arquitectura',owner:'Arquitecto Coordinador',activeProjectId:'proj_ejemplo',currency_default:'EUR',language_default:'es',anthropic_api_key:''},
+  workspace:{name:'Mi Estudio de Arquitectura',firm_name:'',owner:'Arquitecto Coordinador',activeProjectId:'proj_ejemplo',currency_default:'EUR',language_default:'es',anthropic_api_key:''},
   projects:{proj_ejemplo:DEFAULT_PROJECT},
   knowledge:DEFAULT_KB,
   settings:{theme:'light'}
@@ -1601,7 +1605,16 @@ function renderSchedule() {
 
   // Gantt header
   let header=`<div style="display:grid;grid-template-columns:180px 1fr;gap:6px;margin-bottom:4px"><div></div><div class="g-months" style="grid-template-columns:repeat(${TOTAL},1fr)">`;
-  for(let i=1;i<=TOTAL;i++) header+=`<span style="text-align:center;font-size:${TOTAL>16?'9':'10'}px;color:var(--muted)">${unitLabel}${i}</span>`;
+  const _startDate=p.meta?.start_date;
+  for(let i=1;i<=TOTAL;i++){
+    let tooltip='';
+    if(isWeeks&&_startDate){
+      const startMon=new Date(getMondayISO(new Date(_startDate+'T12:00:00'))+'T12:00:00');
+      const colMon=new Date(startMon);colMon.setDate(colMon.getDate()+(i-1)*7);
+      tooltip=` title="${colMon.toLocaleDateString('es-ES',{day:'numeric',month:'short',year:'numeric'})}"`;
+    }
+    header+=`<span style="text-align:center;font-size:${TOTAL>16?'9':'10'}px;color:var(--muted)"${tooltip}>${unitLabel}${i}</span>`;
+  }
   header+='</div></div>';
 
   // Build Gantt rows grouped by zone
@@ -1719,26 +1732,55 @@ function renderSchedule() {
 
   <!-- INFORMES SEMANALES -->
   <div class="card" style="margin-top:14px">
-    <div class="card-title">📅 Informes Semanales
+    <div class="card-title">📅 Informes Semanales de Obra
       <div style="display:flex;gap:8px;align-items:center">
-        <span style="font-size:12px;font-weight:400;color:var(--muted)">${(p.weekly_reports||[]).length} semana(s) con actividad</span>
-        <button onclick="addWeeklyReport()" class="btn btn-ghost btn-sm">+ Semana manual</button>
+        <span style="font-size:12px;font-weight:400;color:var(--muted)">${(p.weekly_reports||[]).length} informe(s)</span>
+        <button onclick="addWeeklyReport()" class="btn btn-ghost btn-sm">+ Informe</button>
+        ${!p.meta?.start_date?'<span style="font-size:11px;color:var(--amber)">⚠ Define fecha de inicio en el proyecto para semanas de obra</span>':''}
       </div>
     </div>
-    ${!(p.weekly_reports||[]).length?'<div style="color:var(--muted);font-size:13px;padding:8px 0">Las fases completadas se registran aquí automáticamente.</div>':
-      (p.weekly_reports||[]).slice().sort((a,b)=>b.week_key.localeCompare(a.week_key)).map(wr=>`
-      <div style="border-bottom:1px solid var(--border2);padding:12px 0">
-        <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;flex-wrap:wrap">
-          <span style="font-weight:600;font-size:13px">Semana ${wr.week_num} / ${wr.year} — ${fmtDate(wr.week_date)}</span>
-          <span class="badge b-green" style="font-size:10px">${wr.completed_phases.length} fase(s) completada(s)</span>
-        </div>
-        <div style="margin-bottom:8px">
-          ${wr.completed_phases.map(ph=>`<div style="font-size:12px;color:var(--muted);padding:1px 0;display:flex;align-items:center;gap:6px"><span style="color:var(--green)">✓</span><span>${ph.label}</span><span style="font-size:11px;opacity:.7">· ${fmtDate(ph.completed_date)}</span></div>`).join('')}
-        </div>
-        <textarea rows="2" placeholder="Descripción: progreso alcanzado, incidencias, próximos pasos…"
-          onchange="setWeeklyReportNotes('${wr.id}',this.value)"
-          style="font-size:12px;padding:6px 8px;border:1px solid var(--border);border-radius:4px;resize:vertical;color:var(--ink)">${wr.notes||''}</textarea>
-      </div>`).join('')
+    ${!(p.weekly_reports||[]).length?`<div style="color:var(--muted);font-size:13px;padding:8px 0">Los informes se generan automáticamente al crear el proyecto. También puedes añadir uno personalizado con + Informe.</div>`:
+      (p.weekly_reports||[]).slice().sort((a,b)=>a.week_key.localeCompare(b.week_key)).map(wr=>{
+        const obraWk=wr.obra_week_num||getObraWeekNum(wr.week_date,p)||wr.week_num;
+        const range=wr.week_date?fmtObraWeekRange(wr.week_date):'';
+        const headerTitle=wr.title||`Semana ${obraWk} de obra`;
+        const approvalColor={pending:'var(--muted)',approved:'var(--green)',in_debate:'#D97706'}[wr.approval_status||'pending'];
+        const approvalLabel={pending:'',approved:`✓ Aprobado por ${wr.approved_by||'cliente'} · ${fmtDate(wr.approved_at)}`,in_debate:'💬 En debate'}[wr.approval_status||'pending'];
+        return `<div style="border:1px solid var(--border);border-radius:8px;margin-bottom:10px;overflow:hidden">
+          <div style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:#F9FAFB;cursor:pointer" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'block':'none'">
+            <span style="font-weight:700;font-size:13px;flex:1">${headerTitle}${range?` <span style='font-weight:400;font-size:11px;color:var(--muted)'>— ${range}</span>`:''}
+            </span>
+            ${wr.completed_phases.length?`<span class="badge b-green" style="font-size:10px">${wr.completed_phases.length} fase(s)</span>`:''}
+            ${approvalLabel?`<span style="font-size:11px;color:${approvalColor}">${approvalLabel}</span>`:''}
+            <button onclick="event.stopPropagation();deleteWeeklyReport('${wr.id}')" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:14px;padding:0 4px" title="Eliminar informe">✕</button>
+          </div>
+          <div style="padding:12px 14px">
+            ${wr.completed_phases.length?`<div style="margin-bottom:10px">${wr.completed_phases.map(ph=>`<div style="font-size:12px;color:var(--muted);padding:1px 0;display:flex;align-items:center;gap:6px"><span style="color:var(--green)">✓</span><span>${ph.label}</span><span style="font-size:11px;opacity:.7">· ${fmtDate(ph.completed_date)}</span></div>`).join('')}</div>`:''}
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
+              <div>
+                <div style="font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px">Actividades realizadas</div>
+                <textarea rows="3" placeholder="Trabajos ejecutados esta semana…"
+                  onchange="saveWeeklyReportField('${wr.id}','activities',this.value)"
+                  style="width:100%;font-size:12px;padding:6px 8px;border:1px solid var(--border);border-radius:4px;resize:vertical;color:var(--ink);font-family:inherit">${wr.activities||''}</textarea>
+              </div>
+              <div>
+                <div style="font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px">Incidencias</div>
+                <textarea rows="3" placeholder="Problemas, retrasos, imprevistos…"
+                  onchange="saveWeeklyReportField('${wr.id}','incidents',this.value)"
+                  style="width:100%;font-size:12px;padding:6px 8px;border:1px solid var(--border);border-radius:4px;resize:vertical;color:var(--ink);font-family:inherit">${wr.incidents||''}</textarea>
+              </div>
+            </div>
+            <div style="margin-bottom:8px">
+              <div style="font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px">Próxima semana</div>
+              <textarea rows="2" placeholder="Trabajos previstos para la próxima semana…"
+                onchange="saveWeeklyReportField('${wr.id}','next_week',this.value)"
+                style="width:100%;font-size:12px;padding:6px 8px;border:1px solid var(--border);border-radius:4px;resize:vertical;color:var(--ink);font-family:inherit">${wr.next_week||''}</textarea>
+            </div>
+            <textarea rows="2" placeholder="Notas adicionales…"
+              onchange="saveWeeklyReportField('${wr.id}','notes',this.value)"
+              style="width:100%;font-size:12px;padding:6px 8px;border:1px solid var(--border);border-radius:4px;resize:vertical;color:var(--ink);font-family:inherit">${wr.notes||''}</textarea>
+          </div>
+        </div>`;}).join('')
     }
   </div>
 
@@ -1957,12 +1999,62 @@ function getMondayISO(date){
   const d=new Date(date||Date.now());const day=d.getDay();
   return new Date(d.getFullYear(),d.getMonth(),d.getDate()-day+(day===0?-6:1)).toISOString().split('T')[0];
 }
+// ISO week string "YYYY-W##" → Monday date string
+function getDateFromISOWeek(year,week){
+  const d=new Date(year,0,1);const day=d.getDay()||7;
+  if(day!==4)d.setDate(d.getDate()+(4-day));
+  d.setDate(d.getDate()-(d.getDay()||7)+1+(week-1)*7);
+  return d.toISOString().split('T')[0];
+}
+// Obra week number: week 1 = week that contains project start_date
+function getObraWeekNum(weekDateStr,p){
+  if(!p?.meta?.start_date)return null;
+  const startMon=new Date(getMondayISO(new Date(p.meta.start_date+'T12:00:00'))+'T12:00:00');
+  const weekMon=new Date(weekDateStr+'T12:00:00');
+  return Math.max(1,Math.round((weekMon-startMon)/(7*24*60*60*1000))+1);
+}
+// Format "14 ene al 20 ene 2026"
+function fmtObraWeekRange(weekDateStr){
+  const mon=new Date(weekDateStr+'T12:00:00');
+  const sun=new Date(mon);sun.setDate(sun.getDate()+6);
+  const s1=mon.toLocaleDateString('es-ES',{day:'numeric',month:'short'});
+  const s2=sun.toLocaleDateString('es-ES',{day:'numeric',month:'short',year:'numeric'});
+  return s1+' al '+s2;
+}
+// Generate weekly report templates for entire project duration
+function generateWeeklyReports(p){
+  if(!p.meta?.start_date)return;
+  const totalWeeks=(p.meta.pre_weeks||1)+(p.meta.obra_weeks||12)+(p.meta.post_weeks||1);
+  if(!p.weekly_reports)p.weekly_reports=[];
+  const startMon=new Date(getMondayISO(new Date(p.meta.start_date+'T12:00:00'))+'T12:00:00');
+  for(let i=0;i<totalWeeks;i++){
+    const weekMon=new Date(startMon);weekMon.setDate(weekMon.getDate()+i*7);
+    const weekDateStr=weekMon.toISOString().split('T')[0];
+    const isoWk=getISOWeek(weekMon);const isoYr=weekMon.getFullYear();
+    const weekKey=isoYr+'-W'+String(isoWk).padStart(2,'0');
+    if(p.weekly_reports.find(r=>r.week_key===weekKey))continue;
+    p.weekly_reports.push({id:uid(),week_key:weekKey,week_num:isoWk,year:isoYr,
+      week_date:weekDateStr,obra_week_num:i+1,title:'',
+      activities:'',incidents:'',next_week:'',
+      completed_phases:[],notes:'',
+      approval_status:'pending',approved_by:null,approved_at:null,debate_comments:[]});
+  }
+  p.weekly_reports.sort((a,b)=>a.week_key.localeCompare(b.week_key));
+}
 function addPhaseToWeeklyReport(phase,proj){
   const p=proj||getProject();if(!p.weekly_reports)p.weekly_reports=[];
   const now=new Date();const wn=getISOWeek(now);const yr=now.getFullYear();
   const weekKey=yr+'-W'+String(wn).padStart(2,'0');
   let wr=p.weekly_reports.find(r=>r.week_key===weekKey);
-  if(!wr){wr={id:uid(),week_key:weekKey,week_num:wn,year:yr,week_date:getMondayISO(now),completed_phases:[],notes:''};p.weekly_reports.push(wr);}
+  if(!wr){
+    const wdate=getMondayISO(now);
+    const obraWk=getObraWeekNum(wdate,p);
+    wr={id:uid(),week_key:weekKey,week_num:wn,year:yr,week_date:wdate,
+      obra_week_num:obraWk,title:'',activities:'',incidents:'',next_week:'',
+      completed_phases:[],notes:'',
+      approval_status:'pending',approved_by:null,approved_at:null,debate_comments:[]};
+    p.weekly_reports.push(wr);
+  }
   if(!wr.completed_phases.find(ph=>ph.phase_id===phase.id)){
     wr.completed_phases.push({phase_id:phase.id,label:phase.label,completed_date:phase.completed_date||new Date().toISOString().split('T')[0]});
   }
@@ -1972,12 +2064,32 @@ function setWeeklyReportNotes(id,notes){
   wr.notes=notes;saveProject();showToast('Informe guardado','success',1500);
 }
 function addWeeklyReport(){
+  const title=prompt('Título del informe (dejar vacío para informe de semana):','')??'';
   const p=getProject();if(!p.weekly_reports)p.weekly_reports=[];
   const now=new Date();const wn=getISOWeek(now);const yr=now.getFullYear();
   const weekKey=yr+'-W'+String(wn).padStart(2,'0');
-  if(p.weekly_reports.find(r=>r.week_key===weekKey)){showToast('Ya existe informe para esta semana','warning');return;}
-  p.weekly_reports.push({id:uid(),week_key:weekKey,week_num:wn,year:yr,week_date:getMondayISO(now),completed_phases:[],notes:''});
-  saveProject();renderSchedule();showToast('Semana añadida','success',2000);
+  if(!title&&p.weekly_reports.find(r=>r.week_key===weekKey)){showToast('Ya existe informe para esta semana','warning');return;}
+  const wdate=getMondayISO(now);const obraWk=getObraWeekNum(wdate,p);
+  const uid2=uid();
+  p.weekly_reports.push({id:uid2,week_key:title?weekKey+'-c'+uid2.slice(-4):weekKey,
+    week_num:wn,year:yr,week_date:wdate,obra_week_num:obraWk,title:title||'',
+    activities:'',incidents:'',next_week:'',
+    completed_phases:[],notes:'',
+    approval_status:'pending',approved_by:null,approved_at:null,debate_comments:[]});
+  saveProject();renderSchedule();showToast('Informe añadido','success',2000);
+}
+function deleteWeeklyReport(id){
+  const p=getProject();
+  const wr=(p.weekly_reports||[]).find(r=>r.id===id);
+  if(!wr)return;
+  const isEmpty=!wr.activities&&!wr.incidents&&!wr.next_week&&!wr.notes&&!wr.completed_phases.length;
+  if(!isEmpty&&!confirm('Este informe tiene contenido. ¿Eliminar de todas formas?'))return;
+  p.weekly_reports=p.weekly_reports.filter(r=>r.id!==id);
+  saveProject();renderSchedule();showToast('Informe eliminado');
+}
+function saveWeeklyReportField(id,field,value){
+  const p=getProject();const wr=(p.weekly_reports||[]).find(r=>r.id===id);if(!wr)return;
+  wr[field]=value;saveProject();showToast('Guardado','success',1000);
 }
 // ─── CAMBIO 4: Reporte de cronograma para cliente ────────────────────────────
 function showScheduleClientReport(){
@@ -2053,14 +2165,17 @@ function showScheduleClientReport(){
         </div>`).join('')}
       </div>`:''}
       <!-- Informes semanales -->
-      ${(p.weekly_reports||[]).length?`<div style="border-top:1px solid #F3F4F6;padding-top:16px;margin-top:4px">
+      ${(p.weekly_reports||[]).filter(wr=>wr.completed_phases?.length||wr.activities||wr.notes).length?`<div style="border-top:1px solid #F3F4F6;padding-top:16px;margin-top:4px">
         <div style="font-size:12px;font-weight:700;color:var(--ink);margin-bottom:10px">📅 Informes Semanales</div>
-        ${(p.weekly_reports||[]).slice().sort((a,b)=>b.week_key.localeCompare(a.week_key)).slice(0,6).map(wr=>`
-          <div style="margin-bottom:12px;padding:10px;background:#F9FAFB;border-radius:8px">
-            <div style="font-weight:600;font-size:12px;margin-bottom:4px;color:#1D4ED8">Semana ${wr.week_num} · ${fmtDate(wr.week_date)}</div>
-            ${wr.completed_phases.map(ph=>`<div style="font-size:11px;color:#374151">✓ ${ph.label}</div>`).join('')}
+        ${(p.weekly_reports||[]).filter(wr=>wr.completed_phases?.length||wr.activities||wr.notes).slice().sort((a,b)=>b.week_key.localeCompare(a.week_key)).slice(0,6).map(wr=>{
+          const owk=wr.obra_week_num||getObraWeekNum(wr.week_date,p)||wr.week_num;
+          const rng=wr.week_date?fmtObraWeekRange(wr.week_date):'';
+          return`<div style="margin-bottom:12px;padding:10px;background:#F9FAFB;border-radius:8px">
+            <div style="font-weight:600;font-size:12px;margin-bottom:4px;color:#1D4ED8">${wr.title||'Semana '+owk+' de obra'} · ${rng}</div>
+            ${(wr.completed_phases||[]).map(ph=>`<div style="font-size:11px;color:#374151">✓ ${ph.label}</div>`).join('')}
+            ${wr.activities?`<div style="font-size:12px;color:#374151;margin-top:4px">${wr.activities.slice(0,120)}${wr.activities.length>120?'…':''}</div>`:''}
             ${wr.notes?`<div style="font-size:12px;color:#6B7280;margin-top:6px;padding-top:6px;border-top:1px solid #E5E7EB">${wr.notes}</div>`:''}
-          </div>`).join('')}
+          </div>`;}).join('')}
       </div>`:''}
     </div>
     <div style="padding:12px 24px;border-top:1px solid #E5E7EB;display:flex;gap:8px;justify-content:flex-end">
@@ -4264,8 +4379,13 @@ function openPhotoModal(presetReportId){
   // Set current week
   const now=new Date();
   const yr=now.getFullYear();
-  const wk=String(Math.ceil((((now-new Date(yr,0,1))/86400000)+new Date(yr,0,1).getDay()+1)/7)).padStart(2,'0');
-  document.getElementById('photo-week').value=yr+'-W'+wk;
+  const isoWkNow=getISOWeek(now);
+  document.getElementById('photo-week').value=yr+'-W'+String(isoWkNow).padStart(2,'0');
+  // Show obra week hint
+  const _ph=getProject();
+  const _obraWkHint=_ph?.meta?.start_date?getObraWeekNum(getMondayISO(now),_ph):null;
+  const _phHintEl=document.getElementById('photo-week-hint');
+  if(_phHintEl)_phHintEl.textContent=_obraWkHint?`Semana ${_obraWkHint} de obra`:'Semana de obra (configura fecha inicio)';
   // Reset dropzone
   document.getElementById('photo-count').textContent='';
   pendingPhotoData=[];
@@ -4282,9 +4402,15 @@ function savePhotos(){
   const desc=document.getElementById('photo-desc').value;
   const reportId=document.getElementById('photo-report-link').value;
 
+  // Compute obra week num from selected ISO week
+  let _obraWkSave=null;
+  if(week&&p.meta?.start_date){
+    const [_wy,_ww]=week.split('-W');const _wdate=getDateFromISOWeek(parseInt(_wy),parseInt(_ww));
+    _obraWkSave=getObraWeekNum(_wdate,p);
+  }
   pendingPhotoData.forEach(ph=>{
     const photoId=uid();
-    p.photos.push({id:photoId,data:ph.data,phase,week,desc,visible_client:vis,date:TODAY,report_id:reportId||null});
+    p.photos.push({id:photoId,data:ph.data,phase,week,obra_week_num:_obraWkSave,desc,visible_client:vis,date:TODAY,report_id:reportId||null});
     // Vincular al informe si se seleccionó uno
     if(reportId){
       const report=p.reports.find(r=>r.id===reportId);
@@ -4924,10 +5050,12 @@ async function iaBatchAnalyzeOne(item){
   const chaptersContext=p.budget.map(b=>b.num+': '+b.desc+' (base: '+b.budget+cur+')').join(', ');
   const existingProviders=p.providers.map(pv=>pv.name).join(', ')||'ninguno todavía';
 
+  const firmName=APP.workspace.firm_name||APP.workspace.name||'';
   const sys=`Eres el motor de extracción inteligente del proyecto "${p.name}" (${p.meta?.city||''}, ${p.meta?.country||''}).
-Coordinador: ${APP.workspace.owner}. Tipo de proyecto: ${p.meta?.type||'residencial'}.
+Coordinador: ${APP.workspace.owner}${firmName?'. Firma/Oficina: '+firmName:''}. Tipo de proyecto: ${p.meta?.type||'residencial'}.
 Capítulos de presupuesto: ${chaptersContext}.
 Proveedores actuales: ${existingProviders}.
+${firmName?`IMPORTANTE: Si el emisor del documento coincide con "${firmName}" o "${APP.workspace.owner}", clasifícalo como documento propio (no de proveedor externo). proveedor.detectado debe ser false en ese caso.`:''}
 
 Analiza el documento y extrae TODA la información posible. Responde SOLO con JSON válido, sin markdown, sin texto adicional:
 
@@ -6079,6 +6207,8 @@ function renderPortalSettings(){
   const p=getProject();if(!p)return;
   const cp=p.client_portal;
   const vis=cp.visibility||{};
+  const msgs=cp.messages||[];
+  const unreadFromClient=msgs.filter(m=>m.from==='cliente'&&!m.read_at).length;
   document.getElementById('page-portal-settings').innerHTML=`
   <div class="grid-2">
     <div class="card">
@@ -6113,9 +6243,47 @@ function renderPortalSettings(){
         ${p.client_portal.published_updates?.length?p.client_portal.published_updates.slice().reverse().map(u=>`<div style="padding:8px;border-bottom:1px solid var(--border2);font-size:12px"><div style="font-weight:500">${u.title}</div><div style="color:var(--muted)">${fmtDate(u.date)}</div></div>`).join(''):'<div style="color:var(--muted);font-size:13px">Sin actualizaciones publicadas</div>'}
       </div>
     </div>
+  </div>
+  <!-- MENSAJERÍA -->
+  <div class="card" style="margin-top:14px">
+    <div class="card-title">💬 Mensajes al cliente
+      ${unreadFromClient?`<span style="background:#DC2626;color:#fff;border-radius:10px;padding:2px 8px;font-size:11px">${unreadFromClient} sin leer</span>`:''}
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+      <div>
+        <div style="font-size:12px;font-weight:600;color:var(--muted);margin-bottom:8px;text-transform:uppercase;letter-spacing:.05em">Nuevo mensaje</div>
+        <div class="form-group"><label class="form-label">Asunto</label><input id="pm-subject" placeholder="Ej: Confirmación estructura completada"></div>
+        <div class="form-group"><label class="form-label">Mensaje</label><textarea id="pm-body" rows="4" placeholder="Escribe aquí el mensaje para el cliente..."></textarea></div>
+        <button class="btn btn-primary" onclick="sendPortalMessage()">✉ Enviar mensaje</button>
+      </div>
+      <div>
+        <div style="font-size:12px;font-weight:600;color:var(--muted);margin-bottom:8px;text-transform:uppercase;letter-spacing:.05em">Historial (${msgs.length})</div>
+        ${msgs.length?msgs.slice().reverse().map(m=>`
+          <div style="padding:8px;border-bottom:1px solid var(--border2);font-size:12px">
+            <div style="display:flex;align-items:center;gap:6px;margin-bottom:2px">
+              <span style="font-weight:600">${m.subject}</span>
+              <span class="badge ${m.from==='arquitecto'?'b-blue':'b-green'}" style="font-size:10px">${m.from==='arquitecto'?'Enviado':'Cliente'}</span>
+              ${m.from==='arquitecto'&&!m.read_at?'<span style="width:8px;height:8px;background:#9CA3AF;border-radius:50%;display:inline-block" title="No leído"></span>':''}
+              ${m.from==='arquitecto'&&m.read_at?'<span style="width:8px;height:8px;background:#2563EB;border-radius:50%;display:inline-block" title="Leído por cliente"></span>':''}
+            </div>
+            <div style="color:var(--muted)">${m.body?.slice(0,80)||''}${(m.body?.length||0)>80?'…':''}</div>
+            <div style="font-size:10px;color:var(--muted);margin-top:2px">${m.sent_at?new Date(m.sent_at).toLocaleString('es-ES',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}):''}</div>
+          </div>`).join('')
+        :'<div style="color:var(--muted);font-size:13px">Sin mensajes</div>'}
+      </div>
+    </div>
   </div>`;
 }
 
+function sendPortalMessage(){
+  const p=getProject();if(!p.client_portal.messages)p.client_portal.messages=[];
+  const subject=document.getElementById('pm-subject')?.value?.trim();
+  const body=document.getElementById('pm-body')?.value?.trim();
+  if(!subject||!body){showToast('Escribe asunto y mensaje','warning');return;}
+  const threadId=uid();
+  p.client_portal.messages.push({id:uid(),subject,body,from:'arquitecto',sent_at:new Date().toISOString(),read_at:null,thread_id:threadId});
+  saveProject();renderPortalSettings();showToast('Mensaje enviado al cliente','success');
+}
 function togglePortalVis(key,val){const p=getProject();if(!p.client_portal.visibility)p.client_portal.visibility={};p.client_portal.visibility[key]=val;saveProject();}
 function savePortalSetting(){const p=getProject();p.client_portal.enabled=document.getElementById('cp-enabled')?.checked;saveProject();}
 function publishPortalUpdate(){
@@ -6136,6 +6304,7 @@ function openClientPortal(){
   document.querySelectorAll('.ptab').forEach(t=>t.classList.remove('active'));
   document.querySelector('.ptab[data-ptab="overview"]')?.classList.add('active');
   renderPortalTab('overview');
+  updatePortalMsgBadge(p);
 }
 
 function closePortal(){
@@ -6161,6 +6330,9 @@ function renderPortalTab(tab){
   else if(tab==='decisions') el.innerHTML=renderPortalDecisions(p,vis,cur);
   else if(tab==='payments') el.innerHTML=renderPortalPayments(p,vis,cur);
   else if(tab==='docs') el.innerHTML=renderPortalDocs(p,vis);
+  else if(tab==='informes') el.innerHTML=renderPortalInformes(p,vis);
+  else if(tab==='messages'){markPortalMessagesRead(p);el.innerHTML=renderPortalMessages(p,cp);}
+  updatePortalMsgBadge(p);
 }
 
 // ── TAB: OVERVIEW ────────────────────────────────────
@@ -6299,7 +6471,7 @@ function renderPortalOverview(p,cp,vis,cur){
 
     <!-- FOOTER -->
     <div style="text-align:center;padding:24px 0;font-size:12px;color:#9CA3AF">
-      Portal del proyecto · ${p.name} · Gestionado por ${APP.workspace.name||APP.workspace.owner}
+      Portal del proyecto · ${p.name} · Gestionado por ${APP.workspace.firm_name||APP.workspace.name||APP.workspace.owner}
     </div>
   </div>`;
 }
@@ -6321,7 +6493,7 @@ function renderPortalPhotos(p,vis){
       ${photos.map(ph=>`
         <div class="portal-photo-item" data-phase="${ph.phase||'Sin fase'}" onclick="openPortalPhoto('${ph.id}')">
           <img src="data:image/jpeg;base64,${ph.data}" loading="lazy" alt="${ph.phase||''}">
-          <div class="portal-photo-caption">${ph.phase||''} ${ph.week?'· Semana '+ph.week:ph.date?'· '+fmtDate(ph.date):''}</div>
+          <div class="portal-photo-caption">${ph.phase||''} ${ph.obra_week_num?'· Semana '+ph.obra_week_num+' de obra':ph.date?'· '+fmtDate(ph.date):''}</div>
         </div>`).join('')}
     </div>
     <!-- Full-screen viewer -->
@@ -6344,7 +6516,7 @@ function filterPortalPhotos(phase,btn){
 function openPortalPhoto(id){
   const p=getProject();const ph=p.photos.find(x=>x.id===id);if(!ph)return;
   document.getElementById('portal-photo-big').src='data:image/jpeg;base64,'+ph.data;
-  document.getElementById('portal-photo-caption-big').textContent=(ph.phase||'')+(ph.week?' · Semana '+ph.week:ph.date?' · '+fmtDate(ph.date):'')+(ph.desc?' · '+ph.desc:'');
+  document.getElementById('portal-photo-caption-big').textContent=(ph.phase||'')+(ph.obra_week_num?' · Semana '+ph.obra_week_num+' de obra':ph.date?' · '+fmtDate(ph.date):'')+(ph.desc?' · '+ph.desc:'');
   document.getElementById('portal-photo-viewer').classList.add('open');
 }
 function closePortalPhoto(){document.getElementById('portal-photo-viewer')?.classList.remove('open');}
@@ -6544,6 +6716,126 @@ function renderPortalLocked(section){
   </div></div>`;
 }
 
+// ── TAB: MENSAJES ────────────────────────────────────
+function markPortalMessagesRead(p){
+  const msgs=p.client_portal?.messages||[];
+  let changed=false;
+  msgs.forEach(m=>{if(m.from==='arquitecto'&&!m.read_at){m.read_at=new Date().toISOString();changed=true;}});
+  if(changed)saveProject();
+}
+function updatePortalMsgBadge(p){
+  const msgs=p?.client_portal?.messages||[];
+  const unread=msgs.filter(m=>m.from==='arquitecto'&&!m.read_at).length;
+  const badge=document.getElementById('portal-msg-badge');
+  if(badge)badge.style.display=unread?'inline':'none';
+}
+function clientSendMessage(){
+  const p=getProject();if(!p.client_portal.messages)p.client_portal.messages=[];
+  const body=document.getElementById('client-msg-input')?.value?.trim();
+  if(!body){showToast('Escribe un mensaje','warning');return;}
+  const latestFromArch=p.client_portal.messages.filter(m=>m.from==='arquitecto').slice(-1)[0];
+  const threadId=latestFromArch?.thread_id||uid();
+  p.client_portal.messages.push({id:uid(),subject:'Re: '+(latestFromArch?.subject||'Mensaje'),body,from:'cliente',sent_at:new Date().toISOString(),read_at:null,thread_id:threadId});
+  saveProject();
+  document.getElementById('client-msg-input').value='';
+  document.getElementById('portal-content').innerHTML=renderPortalMessages(p,p.client_portal);
+  showToast('Mensaje enviado','success',1500);
+}
+function renderPortalMessages(p,cp){
+  const msgs=(cp?.messages||[]);
+  return `<div class="portal-wrap">
+    <div class="portal-card">
+      <div class="portal-card-title">✉ Mensajes del proyecto</div>
+      <div style="min-height:200px;max-height:400px;overflow-y:auto;padding:8px 0;margin-bottom:16px">
+        ${!msgs.length?'<div style="text-align:center;padding:40px;color:#9CA3AF">Sin mensajes todavía</div>':
+          msgs.map(m=>{
+            const isArch=m.from==='arquitecto';
+            return `<div style="display:flex;flex-direction:column;align-items:${isArch?'flex-start':'flex-end'};margin-bottom:14px">
+              <div style="max-width:75%;background:${isArch?'#F9FAFB':'#1B3A5C'};color:${isArch?'#111827':'#fff'};border-radius:${isArch?'4px 12px 12px 12px':'12px 4px 12px 12px'};padding:10px 14px;box-shadow:0 1px 3px rgba(0,0,0,.08)">
+                <div style="font-size:11px;font-weight:600;margin-bottom:4px;opacity:.7">${m.subject}</div>
+                <div style="font-size:14px;line-height:1.6">${m.body}</div>
+              </div>
+              <div style="font-size:10px;color:#9CA3AF;margin-top:3px;display:flex;align-items:center;gap:4px">
+                ${m.sent_at?new Date(m.sent_at).toLocaleString('es-ES',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}):''}
+                ${isArch&&m.read_at?'<span style="width:7px;height:7px;background:#2563EB;border-radius:50%;display:inline-block" title="Leído"></span>':isArch?'<span style="width:7px;height:7px;background:#D1D5DB;border-radius:50%;display:inline-block" title="No leído"></span>':''}
+              </div>
+            </div>`;}).join('')}
+      </div>
+      <div style="display:flex;gap:8px">
+        <textarea id="client-msg-input" rows="2" placeholder="Escribe tu respuesta..." style="flex:1;font-size:13px;padding:8px 10px;border:1px solid #E5E7EB;border-radius:8px;resize:none;font-family:inherit"></textarea>
+        <button onclick="clientSendMessage()" style="padding:8px 16px;background:#1B3A5C;color:#fff;border:none;border-radius:8px;font-size:13px;cursor:pointer;font-family:inherit;align-self:flex-end">Enviar</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+// ── TAB: INFORMES ────────────────────────────────────
+function clientApproveReport(id){
+  const p=getProject();const wr=(p.weekly_reports||[]).find(r=>r.id===id);if(!wr)return;
+  const clientName=p.client?.name||'Cliente';
+  wr.approval_status='approved';wr.approved_by=clientName;wr.approved_at=TODAY;
+  saveProject();
+  document.getElementById('portal-content').innerHTML=renderPortalInformes(p,p.client_portal?.visibility||{});
+  showToast('Informe aprobado','success',2000);
+}
+function clientDebateReport(id){
+  const p=getProject();const wr=(p.weekly_reports||[]).find(r=>r.id===id);if(!wr)return;
+  wr.approval_status='in_debate';if(!wr.debate_comments)wr.debate_comments=[];
+  saveProject();
+  document.getElementById('portal-content').innerHTML=renderPortalInformes(p,p.client_portal?.visibility||{});
+}
+function clientAddDebateComment(id){
+  const p=getProject();const wr=(p.weekly_reports||[]).find(r=>r.id===id);if(!wr)return;
+  const text=document.getElementById('debate-input-'+id)?.value?.trim();
+  if(!text)return;
+  if(!wr.debate_comments)wr.debate_comments=[];
+  wr.debate_comments.push({id:uid(),from:'cliente',text,date:new Date().toISOString()});
+  saveProject();
+  document.getElementById('portal-content').innerHTML=renderPortalInformes(p,p.client_portal?.visibility||{});
+}
+function renderPortalInformes(p,vis){
+  if(!vis.show_reports)return renderPortalLocked('informes semanales');
+  const reports=(p.weekly_reports||[]).filter(wr=>wr.activities||wr.incidents||wr.next_week||wr.notes||wr.completed_phases?.length);
+  if(!reports.length)return`<div class="portal-wrap"><div class="portal-card" style="text-align:center;padding:48px"><div style="font-size:48px;margin-bottom:12px">📅</div><div style="font-size:16px;font-weight:600;color:#374151">Sin informes publicados</div><div style="color:#9CA3AF;margin-top:6px">El equipo publicará informes semanales del avance próximamente</div></div></div>`;
+
+  return `<div class="portal-wrap">
+    ${reports.slice().sort((a,b)=>a.week_key.localeCompare(b.week_key)).map(wr=>{
+      const obraWk=wr.obra_week_num||getObraWeekNum(wr.week_date,p)||wr.week_num;
+      const range=wr.week_date?fmtObraWeekRange(wr.week_date):'';
+      const headerTitle=wr.title||`Semana ${obraWk} de obra`;
+      const apStatus=wr.approval_status||'pending';
+      const apBadge={pending:'',approved:`<span style="background:#DCFCE7;color:#15803D;border-radius:20px;padding:4px 12px;font-size:12px;font-weight:600">✓ Aprobado por ${wr.approved_by||'cliente'} · ${fmtDate(wr.approved_at)}</span>`,in_debate:`<span style="background:#FFFBEB;color:#92400E;border-radius:20px;padding:4px 12px;font-size:12px;font-weight:600">💬 En debate</span>`}[apStatus];
+      return `<div class="portal-card" style="margin-bottom:16px">
+        <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+          <div>
+            <div style="font-size:15px;font-weight:700;color:#111827">${headerTitle}</div>
+            ${range?`<div style="font-size:12px;color:#6B7280;margin-top:2px">${range}</div>`:''}
+          </div>
+          ${apBadge}
+        </div>
+        ${wr.completed_phases?.length?`<div style="margin-bottom:12px">${wr.completed_phases.map(ph=>`<div style="font-size:13px;color:#15803D;padding:2px 0;display:flex;align-items:center;gap:6px"><span>✓</span><span>${ph.label}</span></div>`).join('')}</div>`:''}
+        ${wr.activities?`<div style="margin-bottom:12px"><div style="font-size:11px;font-weight:700;color:#6B7280;text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px">Actividades realizadas</div><div style="font-size:14px;color:#374151;line-height:1.7">${wr.activities}</div></div>`:''}
+        ${wr.incidents?`<div style="margin-bottom:12px;background:#FFFBEB;border-radius:8px;padding:10px 14px"><div style="font-size:11px;font-weight:700;color:#92400E;text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px">⚠ Incidencias</div><div style="font-size:14px;color:#374151;line-height:1.7">${wr.incidents}</div></div>`:''}
+        ${wr.next_week?`<div style="margin-bottom:12px"><div style="font-size:11px;font-weight:700;color:#6B7280;text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px">Próxima semana</div><div style="font-size:14px;color:#374151;line-height:1.7">${wr.next_week}</div></div>`:''}
+        ${wr.notes?`<div style="font-size:13px;color:#6B7280;font-style:italic">${wr.notes}</div>`:''}
+        ${apStatus==='in_debate'?`<div style="margin-top:12px;padding-top:12px;border-top:1px solid #F3F4F6">
+          <div style="font-size:12px;font-weight:600;color:#92400E;margin-bottom:8px">💬 Debate</div>
+          ${(wr.debate_comments||[]).map(c=>`<div style="margin-bottom:8px;display:flex;flex-direction:column;align-items:${c.from==='cliente'?'flex-end':'flex-start'}"><div style="background:${c.from==='cliente'?'#1B3A5C':'#F3F4F6'};color:${c.from==='cliente'?'#fff':'#374151'};border-radius:8px;padding:8px 12px;font-size:13px;max-width:80%">${c.text}</div><div style="font-size:10px;color:#9CA3AF;margin-top:2px">${c.from==='cliente'?'Tú':'Equipo'} · ${c.date?new Date(c.date).toLocaleDateString('es-ES',{day:'numeric',month:'short'}):''}</div></div>`).join('')}
+          <div style="display:flex;gap:8px;margin-top:8px">
+            <input id="debate-input-${wr.id}" placeholder="Escribe un comentario..." style="flex:1;padding:6px 10px;border:1px solid #E5E7EB;border-radius:6px;font-size:13px;font-family:inherit">
+            <button onclick="clientAddDebateComment('${wr.id}')" style="padding:6px 14px;background:#1B3A5C;color:#fff;border:none;border-radius:6px;font-size:13px;cursor:pointer;font-family:inherit">Enviar</button>
+          </div>
+        </div>`:''}
+        ${apStatus==='pending'?`<div style="display:flex;gap:8px;margin-top:12px;padding-top:12px;border-top:1px solid #F3F4F6">
+          <button onclick="clientApproveReport('${wr.id}')" style="flex:1;padding:8px;background:#DCFCE7;color:#15803D;border:1px solid #BBF7D0;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit">✓ Aprobar informe</button>
+          <button onclick="clientDebateReport('${wr.id}')" style="flex:1;padding:8px;background:#FFFBEB;color:#92400E;border:1px solid #FDE68A;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit">💬 Debatir</button>
+        </div>`:apStatus==='approved'?'':`<div style="display:flex;gap:8px;margin-top:12px;padding-top:12px;border-top:1px solid #F3F4F6">
+          <button onclick="clientApproveReport('${wr.id}')" style="flex:1;padding:8px;background:#DCFCE7;color:#15803D;border:1px solid #BBF7D0;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit">✓ Aprobar informe</button>
+        </div>`}
+      </div>`;}).join('')}
+  </div>`;
+}
+
 // ══════════════════════════════════════════════════════
 // IA COPILOT
 // ══════════════════════════════════════════════════════
@@ -6702,13 +6994,14 @@ function createProject(){
     notes_internal:[],notes_ia:[],
     ia_context:{project_summary:'',detected_risks:[],detected_pending:[],last_analyzed:null,imported_docs:[]},
     client_billing:{base_amount:parseInt(document.getElementById('np-budget').value)||0,extras:[],notes:'Presupuesto inicial'},
-    client_portal:{enabled:false,slug,access_token:'tok_'+uid(),visibility:{show_progress:true,show_reports:true,show_photos:true,show_payments:false,show_contracts:false,show_plans:true,show_decisions:true},published_updates:[],client_comments:[],client_approvals:[]},
+    client_portal:{enabled:false,slug,access_token:'tok_'+uid(),visibility:{show_progress:true,show_reports:true,show_photos:true,show_payments:false,show_contracts:false,show_plans:true,show_decisions:true},published_updates:[],client_comments:[],client_approvals:[],messages:[]},
     progress:0,created_at:TODAY,updated_at:TODAY
   };
   if(document.getElementById('np-notes').value){
     newP.notes_internal.push({id:uid(),title:'Brief inicial',content:document.getElementById('np-notes').value,tag:'general',date:TODAY});
   }
   generateDefaultSchedule(newP,obraWeeks,preWeeks,postWeeks);
+  generateWeeklyReports(newP);
   APP.projects[id]=newP;APP.workspace.activeProjectId=id;saveState();
   closeModal('modal-new-project');populateSelector();switchProject(id);wizardNext(1);
   showToast(`Proyecto "${name}" creado · ${newP.schedule.length} fases generadas automáticamente`,'success',4000);
@@ -7012,7 +7305,7 @@ function exportProjectSummaryPDF(){
   </style></head><body>
   <button onclick="window.print()" class="no-print" style="position:fixed;top:12px;right:12px;background:#1B3A5C;color:#fff;border:none;padding:8px 16px;border-radius:6px;cursor:pointer;font-size:13px">🖨 Imprimir / PDF</button>
   <div class="header">
-    <div><div class="brand">TramaOS</div><div style="font-size:12px;color:#6B7280;margin-top:2px">${APP.workspace.name||APP.workspace.owner}</div></div>
+    <div><div class="brand">${APP.workspace.firm_name||'TramaOS'}</div><div style="font-size:12px;color:#6B7280;margin-top:2px">${APP.workspace.name||APP.workspace.owner}</div></div>
     <div style="text-align:right;font-size:11px;color:#6B7280"><div>Generado: ${new Date().toLocaleDateString('es-ES',{day:'2-digit',month:'long',year:'numeric'})}</div><div>Expediente final de proyecto</div></div>
   </div>
   <h1>${p.name}</h1>
@@ -7101,6 +7394,7 @@ function deleteProjectConfirm(){
 
 function openSettings(){
   document.getElementById('cfg-workspace').value=APP.workspace.name||'';
+  document.getElementById('cfg-office-name').value=APP.workspace.firm_name||'';
   // Show archived projects for recovery
   const archived=Object.values(APP.projects).filter(p=>p.status==='archived');
   const archivedHtml=archived.length?`<div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
@@ -7134,8 +7428,10 @@ function restoreProject(id){
 
 function saveSettings(){
   APP.workspace.name=document.getElementById('cfg-workspace').value||APP.workspace.name;
+  APP.workspace.firm_name=document.getElementById('cfg-office-name').value||'';
   saveState();closeModal('modal-settings');
-  document.getElementById('workspace-label').textContent='🏛 '+APP.workspace.name;
+  const topLabel=APP.workspace.firm_name||APP.workspace.name;
+  document.getElementById('workspace-label').textContent='🏛 '+topLabel;
 }
 function exportData(){
   const a=document.createElement('a');a.href='data:application/json;charset=utf-8,'+encodeURIComponent(JSON.stringify(APP,null,2));a.download='TramaOS_backup_'+TODAY+'.json';a.click();
@@ -7194,7 +7490,8 @@ window.addEventListener('load',function(){
   },1200);
 
   // Init
-  document.getElementById('workspace-label').textContent='🏛 '+APP.workspace.name;
+  const _topLabel=APP.workspace.firm_name||APP.workspace.name;
+  document.getElementById('workspace-label').textContent='🏛 '+_topLabel;
   document.getElementById('ia-project-name').textContent=getProject()?.name||'—';
   populateSelector();updateBadges();updateTopProgress();
   // Show admin panel nav (always visible for now — in SaaS will check role)
